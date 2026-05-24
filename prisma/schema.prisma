@@ -1,0 +1,580 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// CORE MODELS (Match code expectations)
+// ==========================================
+
+// ---------- User (NguoiDung) ----------
+model User {
+  id          String   @id @default(cuid()) @map("NguoiDungID")
+  email       String   @unique @map("TenDangNhap")
+  password    String   @map("MatKhauHash")
+  fullName    String   @map("HoTen")
+  phoneNumber String?  @map("SoDienThoai")
+  avatar      String?  @map("AnhDaiDien")
+  role        String   @map("VaiTro") // ADMIN | TEACHER | STUDENT | ACADEMIC_DEPT
+  isActive    Boolean  @default(true) @map("IsActive")
+  createdAt   DateTime @default(now()) @map("NgayTao")
+  updatedAt   DateTime @updatedAt @map("NgayCapNhat")
+
+  admin        Admin?
+  teacher      Teacher?
+  student      Student?
+  academicDept AcademicDept?
+
+  // Relations from other models
+  comments           Comment[]
+  notifications      Notification[]
+  systemLogs         SystemLog[]
+  passwordResetTokens PasswordResetToken[]
+  backups            Backup[]
+  approvals          Approval[]
+  reopenRequestReviews GradingReopenRequest[]
+
+  @@map("NguoiDung")
+}
+
+// ---------- Admin ----------
+model Admin {
+  id           String @id @default(cuid()) @map("AdminID")
+  employeeCode String @unique @map("MaNhanVien")
+  userId       String @unique @map("NguoiDungID")
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("Admin")
+}
+
+// ---------- AcademicDept (PhongDaoTao) ----------
+model AcademicDept {
+  id           String @id @default(cuid()) @map("PhongDaoTaoID")
+  employeeCode String @unique @map("MaNhanVien")
+  userId       String @unique @map("NguoiDungID")
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("PhongDaoTao")
+}
+
+// ---------- Teacher (GiangVien) ----------
+model Teacher {
+  id          String  @id @default(cuid()) @map("GiangVienID")
+  teacherCode String  @unique @map("MaGiangVien")
+  title       String? @map("ChucDanh")
+  userId      String  @unique @map("NguoiDungID")
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  rubrics     Rubric[]
+  assignments Assignment[]
+  grades      Grade[]
+  editRequests EditRequest[] @relation("EditRequestTeacher")
+  resubmissionRequests ResubmissionRequest[] @relation("ResubmissionRequestTeacher")
+  reopenRequests GradingReopenRequest[]
+
+  @@map("GiangVien")
+}
+
+// ---------- Student (SinhVien) ----------
+model Student {
+  id          String  @id @default(cuid()) @map("SinhVienID")
+  studentCode String  @unique @map("MSSV")
+  userId      String  @unique @map("NguoiDungID")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  enrollments      ClassEnrollment[]
+  groupMemberships GroupMember[]
+  submissions      Submission[] @relation("SubmissionStudent")
+  resubmissionRequests ResubmissionRequest[] @relation("ResubmissionRequestStudent")
+
+  @@map("SinhVien")
+}
+
+// ---------- AcademicTerm (KyHoc) ----------
+model AcademicTerm {
+  id        String   @id @default(cuid()) @map("KyHocID")
+  name      String   @unique @map("TenKyHoc")
+  startDate DateTime @map("NgayBatDau") @db.Date
+  endDate   DateTime @map("NgayKetThuc") @db.Date
+  isLocked  Boolean  @default(false) @map("IsLocked")
+  createdAt DateTime @default(now()) @map("NgayTao")
+
+  classes Class[]
+
+  @@map("KyHoc")
+}
+
+// ---------- Subject (MonHoc) ----------
+model Subject {
+  id          String @id @default(cuid()) @map("MonHocID")
+  subjectCode String @unique @map("MaMonHoc")
+  name        String @map("TenMonHoc")
+
+  classes Class[]
+
+  @@map("MonHoc")
+}
+
+// ---------- Class (LopHoc) ----------
+model Class {
+  id        String @id @default(cuid()) @map("LopHocID")
+  classCode String @unique @map("MaLop")
+  subjectId String @map("MonHocID")
+  termId    String @map("KyHocID")
+
+  subject Subject      @relation(fields: [subjectId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  term    AcademicTerm @relation(fields: [termId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  enrollments ClassEnrollment[]
+  groups      Group[]
+  assignments Assignment[]
+
+  @@map("LopHoc")
+}
+
+// ---------- ClassEnrollment (DangKyLopHocPhan) ----------
+model ClassEnrollment {
+  id        String   @id @default(cuid()) @map("DangKyID")
+  studentId String   @map("SinhVienID")
+  classId   String   @map("LopHocID")
+  createdAt DateTime @default(now()) @map("NgayDangKy")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, classId])
+  @@map("DangKyLopHocPhan")
+}
+
+// ---------- Assignment (PhanCong) ----------
+model Assignment {
+  id        String @id @default(cuid()) @map("PhanCongID")
+  classId   String @map("LopHocID")
+  teacherId String @map("GiangVienID")
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([classId, teacherId])
+  @@map("PhanCong")
+}
+
+// ---------- Rubric ----------
+model Rubric {
+  id          String  @id @default(cuid()) @map("RubricID")
+  title       String  @map("TenRubric")
+  description String? @map("MoTa")
+  teacherId   String  @map("NguoiTao")
+  createdAt   DateTime @default(now()) @map("NgayTao")
+
+  teacher Teacher  @relation(fields: [teacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  criteria Criteria[]
+  grades   Grade[]
+
+  @@map("Rubric")
+}
+
+// ---------- Criteria (TieuChiRubric) ----------
+model Criteria {
+  id          String   @id @default(cuid()) @map("TieuChiID")
+  rubricId    String   @map("RubricID")
+  name        String   @map("TenTieuChi")
+  description String?  @map("MoTa")
+  maxScore    Decimal  @map("ThangDiem") @db.Decimal(5, 2)
+  weight      Decimal  @map("TrongSo") @db.Decimal(5, 2)
+  createdAt   DateTime @default(now()) @map("NgayTao")
+
+  rubric Rubric @relation(fields: [rubricId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("TieuChiRubric")
+}
+
+// ---------- Group (NhomSinhVien) ----------
+model Group {
+  id        String   @id @default(cuid()) @map("NhomID")
+  name      String   @map("MaNhom")
+  topicName String   @map("TenDeTai")
+  classId   String   @map("LopHocID")
+  createdAt DateTime @default(now()) @map("NgayTao")
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  members     GroupMember[]
+  submissions Submission[] @relation("SubmissionGroup")
+
+  @@map("NhomSinhVien")
+}
+
+// ---------- Submission (BaoCao - simplified flat model) ----------
+model Submission {
+  id              String   @id @default(cuid()) @map("BaoCaoID")
+  studentId       String?  @map("SinhVienID")
+  groupId         String?  @map("NhomID")
+  filePath        String   @map("DuongDanFile")
+  attachments     String?  @map("FileDinhKem") // Comma-separated
+  status          String   @default("CHUA_NOP") @map("MaTrangThai")
+  version         Int      @default(1) @map("PhienBan")
+  editRequestNote String?  @map("GhiChuYeuCauSua")
+  rejectReason    String?  @map("LyDoTuChoi")
+  submittedAt     DateTime @default(now()) @map("NgayNop")
+  createdAt       DateTime @default(now()) @map("NgayTao")
+  updatedAt       DateTime @updatedAt @map("NgayCapNhat")
+
+  student Student? @relation("SubmissionStudent", fields: [studentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  group   Group?   @relation("SubmissionGroup", fields: [groupId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  statusLogs    SubmissionLog[]
+  grades        Grade[]
+  comments      Comment[]
+  editRequests  EditRequest[]
+  approvals     Approval[]
+  notifications Notification[]
+  resubmissionRequests ResubmissionRequest[]
+  reopenRequests GradingReopenRequest[]
+
+  @@map("BaoCao")
+}
+
+// ---------- SubmissionLog (LichSuTrangThai) ----------
+model SubmissionLog {
+  id           String   @id @default(cuid()) @map("LichSuID")
+  submissionId String   @map("BaoCaoID")
+  oldStatus    String?  @map("TrangThaiCu")
+  newStatus    String   @map("TrangThaiMoi")
+  actorId      String   @map("NguoiThucHien")
+  note         String?  @map("GhiChu")
+  createdAt    DateTime @default(now()) @map("NgayTao")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("LichSuTrangThai")
+}
+
+// ---------- Grade (ChamDiem - simplified flat model) ----------
+model Grade {
+  id             String   @id @default(cuid()) @map("ChamDiemID")
+  submissionId   String   @unique @map("BaoCaoID")
+  rubricId       String   @map("RubricID")
+  teacherId      String   @map("GiangVienID")
+  detailedScores String   @map("DiemChiTiet") // JSON string
+  finalScore     Decimal  @map("DiemTong") @db.Decimal(5, 2)
+  feedback       String?  @map("NhanXet")
+  isApproved     Boolean  @default(false) @map("IsXacNhan")
+  approvedById   String?  @map("NguoiPheDuyet")
+  version        Int      @default(1) @map("PhienBan")
+  createdAt      DateTime @default(now()) @map("NgayTao")
+  updatedAt      DateTime @updatedAt @map("NgayCapNhat")
+
+  rubric    Rubric  @relation(fields: [rubricId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("ChamDiem")
+}
+
+// ---------- SystemConfig (CauHinhHeThong) ----------
+model SystemConfig {
+  id          String  @id @default(cuid()) @map("CauHinhID")
+  key         String  @unique @map("TenCauHinh")
+  value       String  @map("GiaTri")
+  description String? @map("MoTa")
+
+  @@map("CauHinhHeThong")
+}
+
+// ---------- SystemLog (NhatKyHeThong) ----------
+model SystemLog {
+  id          String   @id @default(cuid()) @map("LogID")
+  userId      String?  @map("NguoiDungID")
+  action      String   @map("HanhDong")
+  description String?  @map("MoTa")
+  ipAddress   String?  @map("DiaChiIP")
+  createdAt   DateTime @default(now()) @map("NgayGio")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@map("NhatKyHeThong")
+}
+
+// ---------- Comment (BinhLuan) ----------
+model Comment {
+  id           String   @id @default(cuid()) @map("BinhLuanID")
+  submissionId String   @map("BaoCaoID")
+  userId       String   @map("NguoiGuiID")
+  content      String   @map("NoiDung")
+  isHidden     Boolean  @default(false) @map("IsAn")
+  createdAt    DateTime @default(now()) @map("NgayGui")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user       User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("BinhLuan")
+}
+
+// ---------- Notification (ThongBao) ----------
+model Notification {
+  id             String   @id @default(cuid()) @map("ThongBaoID")
+  userId         String   @map("NguoiNhanID")
+  title          String   @map("TieuDe")
+  content        String   @map("NoiDung")
+  type           String   @map("LoaiThongBao") // TRANG_THAI | DEADLINE | YEU_CAU_SUA | HE_THONG
+  submissionId   String?  @map("BaoCaoID")
+  isRead         Boolean  @default(false) @map("IsDoc")
+  isEmailSent    Boolean  @default(false) @map("IsGuiEmail")
+  createdAt      DateTime @default(now()) @map("NgayTao")
+  readAt         DateTime? @map("NgayDoc")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@map("ThongBao")
+}
+
+// ---------- EditRequest (YeuCauSua) ----------
+model EditRequest {
+  id          String   @id @default(cuid()) @map("YeuCauSuaID")
+  submissionId String  @map("BaoCaoID")
+  teacherId   String   @map("GiangVienID")
+  content     String   @map("NoiDungYeuCau")
+  isResolved  Boolean  @default(false) @map("IsXuLy")
+  createdAt   DateTime @default(now()) @map("NgayGui")
+  resolvedAt  DateTime? @map("NgayXuLy")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teacher    Teacher    @relation("EditRequestTeacher", fields: [teacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("YeuCauSua")
+}
+
+// ---------- Approval (PheDuyetKetQua) ----------
+model Approval {
+  id            String   @id @default(cuid()) @map("PheDuyetID")
+  submissionId  String   @map("BaoCaoID")
+  approvedById  String   @map("NguoiPheDuyet")
+  action        String   @map("HanhDong") // PHE_DUYET | TRA_VE
+  reason        String?  @map("LyDo")
+  createdAt     DateTime @default(now()) @map("NgayThucHien")
+
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  approvedBy   User       @relation(fields: [approvedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("PheDuyetKetQua")
+}
+
+// ---------- PasswordResetToken ----------
+model PasswordResetToken {
+  id        String   @id @default(cuid()) @map("TokenID")
+  userId    String   @map("NguoiDungID")
+  token     String   @unique @map("Token")
+  expiresAt DateTime @map("HetHan")
+  isUsed    Boolean  @default(false) @map("DaSuDung")
+  createdAt DateTime @default(now()) @map("NgayTao")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("PasswordResetToken")
+}
+
+// ---------- Backup (SaoLuuDuLieu) ----------
+model Backup {
+  id          String   @id @default(cuid()) @map("SaoLuuID")
+  name        String   @map("TenSaoLuu")
+  filePath    String   @map("DuongDan")
+  sizeBytes   BigInt?  @map("KichThuocByte")
+  type        String   @map("LoaiSaoLuu") // TU_DONG | THU_CONG
+  status      String   @map("TrangThai") // THANH_CONG | THAT_BAI | DANG_THUC_HIEN
+  note        String?  @map("GhiChu")
+  createdAt   DateTime @default(now()) @map("NgayThucHien")
+  userId      String?  @map("NguoiThucHien")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@map("SaoLuuDuLieu")
+}
+
+// ---------- ResubmissionRequest (YeuCauNopLai) ----------
+model ResubmissionRequest {
+  id             String   @id @default(cuid()) @map("MaYeuCau")
+  submissionId   String   @map("MaBaoCao")
+  studentId      String   @map("MaSinhVien")
+  reason         String   @map("LyDo")
+  status         String   @default("CHO_XU_LY") @map("TrangThai") // CHO_XU_LY | DA_DUYET | TU_CHOI
+  createdAt      DateTime @default(now()) @map("ThoiGianGui")
+  reviewerId     String?  @map("NguoiDuyet")
+  feedbackNote   String?  @map("GhiChuPhanHoi")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  student    Student    @relation("ResubmissionRequestStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  reviewer   Teacher?   @relation("ResubmissionRequestTeacher", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@map("YeuCauNopLai")
+}
+
+// ---------- EmailLog (LichSuEmail) ----------
+model EmailLog {
+  id           String   @id @default(cuid()) @map("LogEmailID")
+  recipient    String   @map("NguoiNhan")
+  type         String   @map("LoaiEmail")
+  status       String   @map("TrangThai") // PENDING | SENDING | SENT | FAILED | SKIPPED
+  error        String?  @map("LoiKhongGhe")
+  dedupeKey    String?  @unique @map("KhoaChongLap")
+  createdAt    DateTime @default(now()) @map("NgayGui")
+
+  @@map("LichSuEmail")
+}
+
+// ---------- GradingReopenRequest (YeuCauMoLaiChamDiem) ----------
+model GradingReopenRequest {
+  id            String   @id @default(uuid())
+  submissionId  String
+  teacherId     String
+  reason        String
+  status        GradingReopenRequestStatus @default(PENDING)
+
+  reviewedById  String?
+  reviewNote    String?
+  reviewedAt    DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  submission    Submission @relation(fields: [submissionId], references: [id])
+  teacher       Teacher    @relation(fields: [teacherId], references: [id])
+  reviewer      User?      @relation(fields: [reviewedById], references: [id])
+
+  @@index([submissionId])
+  @@index([teacherId])
+  @@index([status])
+  @@map("YeuCauMoLaiChamDiem")
+}
+
+enum GradingReopenRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// ==========================================
+// SUPPORTING MODELS (For DB compat / future use)
+// These exist in the DB design doc but aren't directly used by current code
+// ==========================================
+
+// ---------- Faculty (Khoa) ----------
+model Faculty {
+  id       String @id @default(cuid()) @map("KhoaID")
+  code     String @unique @map("MaKhoa")
+  name     String @map("TenKhoa")
+  description String? @map("MoTa")
+
+  @@map("Khoa")
+}
+
+// ---------- Role (VaiTro) ----------
+model Role {
+  id          String @id @default(cuid()) @map("VaiTroID")
+  code        String @unique @map("MaVaiTro")
+  name        String @map("TenVaiTro")
+  description String? @map("MoTa")
+
+  @@map("VaiTro")
+}
+
+// ---------- ReportStatus (TrangThaiBaoCao) ----------
+model ReportStatus {
+  id       String @id @map("MaTrangThai")
+  name     String @map("TenTrangThai")
+  description String? @map("MoTa")
+  displayOrder Int @map("ThuTuHienThi")
+
+  @@map("TrangThaiBaoCao")
+}
+
+// ---------- Topic (DeTai) ----------
+model Topic {
+  id        String   @id @default(cuid()) @map("DeTaiID")
+  name      String   @map("TenDeTai")
+  description String? @map("MoTa")
+  groupId   String?  @map("NhomID")
+  studentId String?  @map("SinhVienID")
+  createdAt DateTime @default(now()) @map("NgayTao")
+
+  @@map("DeTai")
+}
+
+// ---------- GroupMember (ThanhVienNhom) ----------
+model GroupMember {
+  id        String   @id @default(cuid()) @map("ThanhVienNhomID")
+  groupId   String   @map("NhomID")
+  studentId String   @map("SinhVienID")
+  joinedAt  DateTime @default(now()) @map("NgayThamGia")
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, studentId])
+  @@map("ThanhVienNhom")
+}
+
+// ---------- AssignmentHistory (LichSuPhanCong) ----------
+model AssignmentHistory {
+  id           String   @id @default(cuid()) @map("LichSuPhanCongID")
+  assignmentId String   @map("PhanCongID")
+  oldTeacherId String   @map("GiangVienCuID")
+  newTeacherId String   @map("GiangVienMoiID")
+  reason       String   @map("LyDo")
+  changedById  String   @map("NguoiThucHien")
+  createdAt    DateTime @default(now()) @map("NgayThayDoi")
+
+  @@map("LichSuPhanCong")
+}
+
+// ---------- ReportFile (FileBaoCao) ----------
+model ReportFile {
+  id           String   @id @default(cuid()) @map("FileID")
+  submissionId String   @map("BaoCaoID")
+  version      Int      @map("LanNop")
+  fileType     String   @map("LoaiFile")
+  fileName     String   @map("TenFile")
+  fileFormat   String   @map("DinhDangFile")
+  fileSize     BigInt   @map("DungLuongByte")
+  storagePath  String   @map("DuongDanLuuTru")
+  fileHash     String?  @map("HashFile")
+  uploadedAt   DateTime @default(now()) @map("NgayNop")
+  uploadedBy   String   @map("NguoiNop")
+  isCurrent    Boolean  @default(true) @map("IsHienTai")
+
+  @@map("FileBaoCao")
+}
+
+// ---------- SubmissionHistory (LichSuNop) ----------
+model SubmissionHistory {
+  id           String   @id @default(cuid()) @map("LichSuNopID")
+  submissionId String   @map("BaoCaoID")
+  version      Int      @map("LanNop")
+  submittedAt  DateTime @map("NgayNop")
+  fileCount    Int      @default(0) @map("SoFileDaKem")
+  note         String?  @map("GhiChu")
+  submittedBy  String   @map("NguoiNop")
+
+  @@map("LichSuNop")
+}
+
+// ---------- DetailedScore (DiemTheoTieuChi) ----------
+model DetailedScore {
+  id        String   @id @default(cuid()) @map("DiemTieuChiID")
+  gradeId   String   @map("ChamDiemID")
+  criteriaId String  @map("TieuChiID")
+  score     Decimal  @map("DiemNhap") @db.Decimal(5, 2)
+  comment   String?  @map("NhanXet")
+  createdAt DateTime @default(now()) @map("NgayNhap")
+
+  @@unique([gradeId, criteriaId])
+  @@map("DiemTheoTieuChi")
+}
