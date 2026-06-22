@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { userService } from '../services/user.service';
 import { ApiResponse, BadRequestError } from '../utils/apiResponse';
+import { auditLog } from '../utils/audit';
 
 export class UserController {
     /**
@@ -79,6 +80,8 @@ export class UserController {
                 classId,
                 title,
             });
+            // UC-I04: ghi audit
+            await auditLog(req.user?.id ?? null, 'TAO_TAI_KHOAN', `Tạo tài khoản ${email} (role=${role})`, req.ip);
             return ApiResponse.success(res, "Tạo tài khoản người dùng mới thành công!", result, 201);
         } catch (error) {
             return next(error);
@@ -93,6 +96,8 @@ export class UserController {
             const { id } = req.params;
             const { role, isActive } = req.body;
             const result = await userService.updateRoleStatus(id, role, isActive);
+            // UC-I04: ghi audit
+            await auditLog(req.user?.id ?? null, 'CAP_NHAT_VAI_TRO', `Cập nhật tài khoản ${id} → role=${role}, isActive=${isActive}`, req.ip);
             return ApiResponse.success(res, "Cập nhật vai trò và trạng thái tài khoản thành công!", result);
         } catch (error) {
             return next(error);
@@ -107,6 +112,8 @@ export class UserController {
             const { id } = req.params;
             const { password } = req.body;
             const result = await userService.resetPassword(id, password);
+            // UC-I04: ghi audit (KHÔNG log mật khẩu)
+            await auditLog(req.user?.id ?? null, 'RESET_MAT_KHAU_ADMIN', `Reset mật khẩu cho tài khoản ${id}`, req.ip);
             return ApiResponse.success(res, "Cấp lại mật khẩu thành công!", result);
         } catch (error) {
             return next(error);

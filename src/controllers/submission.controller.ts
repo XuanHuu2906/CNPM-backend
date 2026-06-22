@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { submissionService } from '../services/submission.service';
 import { ApiResponse, BadRequestError } from '../utils/apiResponse';
+import { auditLog } from '../utils/audit';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 
@@ -51,6 +52,15 @@ export class SubmissionController {
         actorId,
         req.user!.fullName,
         req.user!.role
+      );
+
+      // UC-I04: ghi audit thay đổi trạng thái bài nộp (SubmissionLog đã có cho chi tiết riêng từng bài;
+      // SystemLog đảm bảo truy vết xuyên hệ thống).
+      await auditLog(
+        req.user?.id ?? null,
+        'CAP_NHAT_TRANG_THAI_BAI',
+        `Cập nhật bài nộp ${id} → ${status}${violationType ? ` (violationType=${violationType})` : ''}`,
+        req.ip,
       );
 
       return ApiResponse.success(res, "Cập nhật trạng thái bài báo cáo thành công", submission);

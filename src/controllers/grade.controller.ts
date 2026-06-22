@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { gradeService } from '../services/grade.service';
 import { submissionRepository } from '../repositories/submission.repository';
 import { ApiResponse, BadRequestError, ForbiddenError } from '../utils/apiResponse';
+import { auditLog } from '../utils/audit';
 import { UserRole, SubmissionStatus } from '@prisma/client';
 
 export class GradeController {
@@ -19,6 +20,14 @@ export class GradeController {
         submissionId,
         teacherId,
         { rubricId, detailedScores, feedback, version, isDraft }
+      );
+
+      // UC-I04: ghi audit chấm điểm (nháp / chính thức)
+      await auditLog(
+        req.user?.id ?? null,
+        isDraft ? 'CHAM_DIEM_NHAP' : 'CHAM_DIEM_CHINH_THUC',
+        `Chấm điểm bài nộp ${submissionId} (rubric=${rubricId}, isDraft=${!!isDraft})`,
+        req.ip,
       );
 
       return ApiResponse.created(res, "Lưu kết quả chấm điểm báo cáo môn học thành công", grade);
