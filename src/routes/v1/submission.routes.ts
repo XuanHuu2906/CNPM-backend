@@ -26,6 +26,8 @@ const ALLOWED_UPLOAD_MIMES = new Set([
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]);
+// UC-I02: whitelist extension để chặn file đã bị "rename" né mime detection.
+const ALLOWED_UPLOAD_EXTS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx']);
 
 // API tải file thực tế lên Cloudinary và trả về URL bảo mật
 // B16: chỉ Sinh viên / Giảng viên được upload (loại Admin/PĐT để tránh spam Cloudinary quota).
@@ -40,6 +42,17 @@ router.post('/upload', authenticate, authorize(UserRole.STUDENT, UserRole.TEACHE
       return res.status(400).json({
         success: false,
         message: `Định dạng tệp tin '${req.file.mimetype}' không được hỗ trợ. Chỉ chấp nhận PDF, ảnh PNG/JPEG, DOC, DOCX.`,
+      });
+    }
+
+    // UC-I02: kiểm tra extension song song với mime để chặn file đã đổi tên giả mime.
+    const originalName = req.file.originalname || '';
+    const dotIdx = originalName.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? originalName.substring(dotIdx).toLowerCase() : '';
+    if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+      return res.status(400).json({
+        success: false,
+        message: `Phần mở rộng tệp tin '${ext || '(không có)'}' không được hỗ trợ. Chỉ chấp nhận .pdf, .png, .jpg, .jpeg, .doc, .docx.`,
       });
     }
 
