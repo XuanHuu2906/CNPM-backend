@@ -16,7 +16,8 @@ export const updateTermSchema = z.object({
     name: z.string().min(2, "Tên học kỳ phải chứa ít nhất 2 ký tự").optional(),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
-    isLocked: z.boolean().optional(),
+    // UC-19: khóa học kỳ phải đi qua POST /system/semesters/:id/lock để chạy precondition (toàn bộ báo cáo phải HOAN_THANH).
+    // Không cho set isLocked trực tiếp qua updateTerm để tránh bypass.
   }).refine((data) => {
     if (data.startDate && data.endDate) {
       return data.startDate < data.endDate;

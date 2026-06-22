@@ -3,7 +3,9 @@ import { submissionRepository } from '../repositories/submission.repository';
 import { rubricService } from './rubric.service';
 import { academicService } from './academic.service';
 import { notificationService } from './notification.service';
-import { BadRequestError, NotFoundError } from '../utils/apiResponse';
+import { prisma } from '../config/prisma';
+import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/apiResponse';
+import { verifyTeacherClassOwnership } from '../utils/ownership';
 import { Grade, SubmissionStatus } from '@prisma/client';
 
 export class GradeService {
@@ -27,8 +29,35 @@ export class GradeService {
       throw new NotFoundError("Không tìm thấy thông tin bài báo cáo bài nộp cần chấm điểm");
     }
 
-    // Kiểm tra bảng điểm cũ đã được duyệt chưa
+    // B5: Xác minh GV được phân công LHP của bài nộp này.
+    // B8: nếu bài nộp cá nhân (không group), lookup classId qua Enrollment của SV.
+    let classId: string | undefined = submission.group?.classId;
+    if (!classId && submission.studentId) {
+      const enrollment = await prisma.classEnrollment.findFirst({
+        where: { studentId: submission.studentId },
+        orderBy: { createdAt: 'desc' },
+        select: { classId: true },
+      });
+      classId = enrollment?.classId;
+    }
+    if (!classId) {
+      throw new BadRequestError('Không xác định được lớp học phần của bài nộp này.');
+    }
+    await verifyTeacherClassOwnership(classId, teacherId);
+
+    // B7: Chặn cập nhật điểm khi bài đã chấm xong / chờ duyệt / hoàn thành.
+    // GV phải gửi yêu cầu mở lại chấm điểm để chỉnh sửa.
+    const lockedStatuses: SubmissionStatus[] = [
+      SubmissionStatus.DA_CHAM,
+      SubmissionStatus.CHO_DUYET,
+      SubmissionStatus.HOAN_THANH,
+    ];
     const existingGrade = await gradeRepository.findGradeBySubmissionId(submissionId);
+    if (existingGrade && lockedStatuses.includes(submission.status as SubmissionStatus)) {
+      throw new ForbiddenError(
+        'Bài nộp đã được chấm. Vui lòng gửi yêu cầu mở lại chấm điểm để chỉnh sửa.'
+      );
+    }
     if (existingGrade && existingGrade.isApproved) {
       throw new BadRequestError("Bảng điểm của bài báo cáo này đã được Phòng Đào Tạo phê duyệt chính thức. Không thể chỉnh sửa điểm số!");
     }
@@ -38,10 +67,7 @@ export class GradeService {
     }
 
     // 2. Chốt chặn học kỳ: Kiểm tra học kỳ chứa lớp học phần này đã bị khóa điểm hay chưa
-    const classId = submission.group?.classId;
-    if (classId) {
-      await academicService.verifyTermActive(classId);
-    }
+    await academicService.verifyTermActive(classId);
 
     // 3. Tìm thông tin Rubric và mảng tiêu chí chi tiết Criteria
     const rubric = await rubricService.getRubricById(data.rubricId);

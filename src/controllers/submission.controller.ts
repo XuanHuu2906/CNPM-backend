@@ -1,65 +1,101 @@
 import { Request, Response, NextFunction } from 'express';
 import { submissionService } from '../services/submission.service';
 import { ApiResponse, BadRequestError } from '../utils/apiResponse';
+import { auditLog } from '../utils/audit';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 
 export class SubmissionController {
-  async submitReport(req: Request, res: Response) {
-    const studentId = req.user?.actorId;
-    if (!studentId) {
-      throw new BadRequestError("Tác nhân thực hiện nộp bài phải là Sinh viên");
+  async submitReport(req: Request, res: Response, next: NextFunction) {
+    try {
+      const studentId = req.user?.actorId;
+      if (!studentId) {
+        throw new BadRequestError("Tác nhân thực hiện nộp bài phải là Sinh viên");
+      }
+
+      const submission = await submissionService.submitReport(studentId, req.body);
+      return ApiResponse.created(res, "Nộp tệp tin báo cáo môn học thành công", submission);
+    } catch (error) {
+      return next(error);
     }
-
-    const submission = await submissionService.submitReport(studentId, req.body);
-    return ApiResponse.created(res, "Nộp tệp tin báo cáo môn học thành công", submission);
   }
 
-  async getMySubmission(req: Request, res: Response) {
-    const studentId = req.user?.actorId;
-    if (!studentId) {
-      throw new BadRequestError("Tác nhân thực hiện phải là Sinh viên");
+  async getMySubmission(req: Request, res: Response, next: NextFunction) {
+    try {
+      const studentId = req.user?.actorId;
+      if (!studentId) {
+        throw new BadRequestError("Tác nhân thực hiện phải là Sinh viên");
+      }
+
+      const classId = typeof req.query.classId === 'string' ? req.query.classId : undefined;
+      const submission = await submissionService.getStudentSubmission(studentId, classId);
+      return ApiResponse.success(res, "Lấy thông tin bài nộp thành công", submission);
+    } catch (error) {
+      return next(error);
     }
-
-    const submission = await submissionService.getStudentSubmission(studentId);
-    return ApiResponse.success(res, "Lấy thông tin bài nộp thành công", submission);
   }
 
-  async updateStatus(req: Request, res: Response) {
-    const { id } = req.params;
-    const { status, note, rejectReason, editRequestNote, version } = req.body;
-    const actorId = req.user?.actorId;
+  async updateStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { status, note, rejectReason, violationType, editRequestNote, version } = req.body;
+      const actorId = req.user?.actorId;
 
-    if (!actorId) {
-      throw new BadRequestError("Không xác định được ID tác nhân phê duyệt thay đổi");
+      if (!actorId) {
+        throw new BadRequestError("Không xác định được ID tác nhân phê duyệt thay đổi");
+      }
+
+      const submission = await submissionService.updateStatus(
+        id,
+        version,
+        { status, note, rejectReason, violationType, editRequestNote },
+        actorId,
+        req.user!.fullName,
+        req.user!.role
+      );
+
+      // UC-I04: ghi audit thay đổi trạng thái bài nộp (SubmissionLog đã có cho chi tiết riêng từng bài;
+      // SystemLog đảm bảo truy vết xuyên hệ thống).
+      await auditLog(
+        req.user?.id ?? null,
+        'CAP_NHAT_TRANG_THAI_BAI',
+        `Cập nhật bài nộp ${id} → ${status}${violationType ? ` (violationType=${violationType})` : ''}`,
+        req.ip,
+      );
+
+      return ApiResponse.success(res, "Cập nhật trạng thái bài báo cáo thành công", submission);
+    } catch (error) {
+      return next(error);
     }
-
-    const submission = await submissionService.updateStatus(
-      id,
-      version,
-      { status, note, rejectReason, editRequestNote },
-      actorId,
-      req.user!.fullName
-    );
-
-    return ApiResponse.success(res, "Cập nhật trạng thái bài báo cáo thành công", submission);
   }
 
-  async getSubmissionById(req: Request, res: Response) {
-    const { id } = req.params;
-    const submission = await submissionService.getSubmissionById(id);
-    return ApiResponse.success(res, "Lấy chi tiết tệp tin báo cáo thành công", submission);
+  async getSubmissionById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const submission = await submissionService.getSubmissionById(id);
+      return ApiResponse.success(res, "Lấy chi tiết tệp tin báo cáo thành công", submission);
+    } catch (error) {
+      return next(error);
+    }
   }
 
-  async getSubmissionsByClassId(req: Request, res: Response) {
-    const { classId } = req.params;
-    const submissions = await submissionService.getSubmissionsByClassId(classId);
-    return ApiResponse.success(res, "Lấy danh sách báo cáo nộp của lớp học phần thành công", submissions);
+  async getSubmissionsByClassId(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { classId } = req.params;
+      const submissions = await submissionService.getSubmissionsByClassId(classId);
+      return ApiResponse.success(res, "Lấy danh sách báo cáo nộp của lớp học phần thành công", submissions);
+    } catch (error) {
+      return next(error);
+    }
   }
 
-  async getAllSubmissions(req: Request, res: Response) {
-    const submissions = await submissionService.getAllSubmissions();
-    return ApiResponse.success(res, "Lấy danh sách toàn bộ báo cáo nộp thành công", submissions);
+  async getAllSubmissions(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const submissions = await submissionService.getAllSubmissions();
+      return ApiResponse.success(res, "Lấy danh sách toàn bộ báo cáo nộp thành công", submissions);
+    } catch (error) {
+      return next(error);
+    }
   }
 
   async exportPdf(req: Request, res: Response, next: NextFunction) {

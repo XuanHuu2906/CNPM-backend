@@ -28,9 +28,9 @@ export class AcademicService {
     return term;
   }
 
-  async updateTerm(id: string, data: Partial<{ name: string; startDate: Date; endDate: Date; isLocked: boolean }>): Promise<AcademicTerm> {
+  async updateTerm(id: string, data: Partial<{ name: string; startDate: Date; endDate: Date }>): Promise<AcademicTerm> {
     await this.getTermById(id); // Kiểm tra tồn tại
-    
+
     if (data.name) {
       const existing = await academicRepository.findTermByName(data.name);
       if (existing && existing.id !== id) {
@@ -38,6 +38,7 @@ export class AcademicService {
       }
     }
 
+    // UC-19: không cho phép thay đổi isLocked qua endpoint này — phải dùng POST /system/semesters/:id/lock
     return await academicRepository.updateTerm(id, data);
   }
 
@@ -273,6 +274,10 @@ export class AcademicService {
   }
 
   async createEnrollmentsBatch(enrollments: any[]) {
+    // S4: hạn chế kích thước batch để tránh DoS / cạn bộ nhớ
+    if (enrollments.length > 500) {
+      throw new BadRequestError('Mỗi lần nhập tối đa 500 bản ghi đăng ký lớp');
+    }
     const results = [];
     for (const data of enrollments) {
       try {

@@ -4,7 +4,8 @@ import { notificationService } from './notification.service';
 import { studentNotificationService } from './student-notification.service';
 import { prisma } from '../config/prisma';
 import { BadRequestError, NotFoundError } from '../utils/apiResponse';
-import { Submission, SubmissionStatus } from '@prisma/client';
+import { verifyTeacherClassOwnership } from '../utils/ownership';
+import { Submission, SubmissionStatus, UserRole } from '@prisma/client';
 
 export class SubmissionService {
   /**
@@ -53,9 +54,27 @@ export class SubmissionService {
     const existingSubmission = await submissionRepository.findStudentSubmissionInClass(studentId, groupId);
 
     if (existingSubmission) {
-      // Nếu đã có bài nộp, tiến hành nộp đè bài mới (resubmit)
-      if (existingSubmission.status === SubmissionStatus.DA_CHAM || existingSubmission.status === SubmissionStatus.HOAN_THANH) {
-        throw new BadRequestError("Bài báo cáo môn học đã được giảng viên chấm điểm hoàn thành. Bạn không thể nộp đè!");
+      // R3: SV không tự nộp đè. Chỉ cho phép resubmit khi:
+      //  - Bài đang ở trạng thái YEU_CAU_SUA (GV đã yêu cầu sửa), HOẶC
+      //  - Có ResubmissionRequest đã được duyệt (DA_DUYET) cho bài này.
+      const isEditRequested = existingSubmission.status === SubmissionStatus.YEU_CAU_SUA;
+
+      let hasApprovedResubmitRequest = false;
+      if (!isEditRequested) {
+        const approvedRequest = await prisma.resubmissionRequest.findFirst({
+          where: {
+            submissionId: existingSubmission.id,
+            studentId,
+            status: 'DA_DUYET',
+          },
+        });
+        hasApprovedResubmitRequest = !!approvedRequest;
+      }
+
+      if (!isEditRequested && !hasApprovedResubmitRequest) {
+        throw new BadRequestError(
+          "Bạn đã nộp bài. Vui lòng gửi 'Yêu cầu nộp lại' và chờ Giảng viên duyệt trước khi nộp đè."
+        );
       }
 
       const result = await submissionRepository.resubmitReport(
@@ -68,12 +87,13 @@ export class SubmissionService {
       return result;
     } else {
       // Nếu chưa có bài nộp, tiến hành tạo mới
+      // B17: luôn lưu studentId (kể cả khi có group) để ghi nhận người nộp; groupId xác định bài nhóm.
       const submissionData = {
         filePath: data.filePath,
         attachments: data.attachments,
         status: SubmissionStatus.DA_NOP,
-        studentId: groupId ? null : studentId, // Nộp cá nhân
-        groupId: groupId ? groupId : null, // Nộp theo Nhóm
+        studentId,
+        groupId: groupId ? groupId : null,
       };
 
       const result = await submissionRepository.createSubmission(submissionData, studentId);
@@ -92,25 +112,44 @@ export class SubmissionService {
       status: SubmissionStatus;
       note?: string;
       rejectReason?: string;
+      // B13: phân loại vi phạm — thay vì nhét JSON vào rejectReason.
+      violationType?: string;
       editRequestNote?: string;
     },
     actorId: string,
-    reqUserFullName: string
+    reqUserFullName: string,
+    actorRole?: UserRole
   ): Promise<Submission> {
     const submission = await submissionRepository.findSubmissionById(id);
     if (!submission) {
       throw new NotFoundError("Không tìm thấy thông tin bài nộp để cập nhật");
     }
 
-    // Xác minh niên khóa tương ứng còn hoạt động — dùng group.classId hoặc tìm qua enrollment
-    const classId = submission.group?.classId || null;
+    // B8: Khi SV nộp cá nhân (không có group), lookup classId qua Enrollment để vẫn chốt được học kỳ
+    let classId: string | null = submission.group?.classId || null;
+    if (!classId && submission.studentId) {
+      const enrollment = await prisma.classEnrollment.findFirst({
+        where: { studentId: submission.studentId },
+        orderBy: { createdAt: 'desc' },
+        select: { classId: true },
+      });
+      classId = enrollment?.classId ?? null;
+    }
+
     if (classId) {
       await academicService.verifyTermActive(classId);
+    } else {
+      throw new BadRequestError('Không xác định được lớp học phần của bài nộp này.');
+    }
+
+    // B4: GV chỉ được duyệt/từ chối bài nộp thuộc lớp mình phụ trách
+    if (actorRole === UserRole.TEACHER) {
+      await verifyTeacherClassOwnership(classId, actorId);
     }
 
     // Chặn giảng viên tự ý chuyển từ DA_CHAM/CHO_DUYET về DANG_CHAM
     if (data.status === SubmissionStatus.DANG_CHAM) {
-      if (submission.status === SubmissionStatus.DA_CHAM || submission.status === 'CHO_DUYET') {
+      if (submission.status === SubmissionStatus.DA_CHAM || submission.status === SubmissionStatus.CHO_DUYET) {
         throw new BadRequestError("Không được phép tự ý chuyển trạng thái báo cáo về Đang chấm. Vui lòng gửi yêu cầu mở lại chấm điểm.");
       }
     }
@@ -123,6 +162,7 @@ export class SubmissionService {
         status: data.status,
         note: data.note,
         rejectReason: data.rejectReason,
+        violationType: data.violationType,
         editRequestNote: data.editRequestNote,
       },
       actorId
@@ -150,28 +190,27 @@ export class SubmissionService {
       }
     }
 
-    // Nếu có rejectReason chứa thông tin CHO_KIEM_TRA, gửi thêm thông báo cho giảng viên phụ trách
-    if (data.rejectReason && (data.rejectReason.includes('"type":"CHO_KIEM_TRA"') || data.rejectReason.includes('"status":"CHO_KIEM_TRA"'))) {
+    // B13: phân loại vi phạm đã lưu vào field violationType. Backward-compat: vẫn nhận
+    // diện được payload cũ kiểu '{"type":"CHO_KIEM_TRA",...}' nhúng trong rejectReason.
+    const violationType = data.violationType
+      ?? (data.rejectReason && (data.rejectReason.includes('"type":"CHO_KIEM_TRA"') || data.rejectReason.includes('"status":"CHO_KIEM_TRA"'))
+            ? 'CHO_KIEM_TRA'
+            : undefined);
+
+    if (violationType === 'CHO_KIEM_TRA') {
       try {
         const clsId = submission.group?.classId;
         if (clsId) {
           const assignment = await prisma.assignment.findFirst({
             where: { classId: clsId },
-            include: {
-              teacher: true,
-            },
+            include: { teacher: true },
           });
           const teacherUserId = assignment?.teacher?.userId;
           if (teacherUserId) {
-            let parsedLog: any = {};
-            try {
-              parsedLog = JSON.parse(data.rejectReason);
-            } catch (e) {}
-            
             await notificationService.createNotification({
               userId: teacherUserId,
               title: 'Cảnh báo vi phạm báo cáo mới',
-              content: `Admin đã gắn cảnh báo vi phạm [${parsedLog.warningType || parsedLog.violationType || 'Quy chế'}] cho báo cáo ${id}. Lý do: ${parsedLog.reason || ''}. Vui lòng kiểm tra lại.`,
+              content: `Admin đã gắn cảnh báo vi phạm [${violationType}] cho báo cáo ${id}. Lý do: ${data.rejectReason || ''}. Vui lòng kiểm tra lại.`,
               type: 'TRANG_THAI',
               submissionId: id,
             });
@@ -186,9 +225,11 @@ export class SubmissionService {
   }
 
   /**
-   * Lấy bài nộp hiện tại của Sinh viên (hoặc nhóm của sinh viên)
+   * Lấy bài nộp hiện tại của Sinh viên trong một LHP cụ thể (UC-10/UC-18/UC-22).
+   * B9: Bắt buộc nhận classId để xác định chính xác bài thuộc lớp nào (SV có thể đăng ký nhiều LHP).
+   * Backwards-compat: nếu không truyền classId, fallback theo group đầu tiên (cảnh báo deprecated).
    */
-  async getStudentSubmission(studentId: string) {
+  async getStudentSubmission(studentId: string, classId?: string) {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
@@ -204,10 +245,20 @@ export class SubmissionService {
       throw new NotFoundError("Không tìm thấy thông tin tài khoản sinh viên");
     }
 
-    // Lấy groupId đầu tiên (nếu có) — backwards compat: SV có thể ở nhiều LHP nhưng submission flow cần classId
-    const groupId = student.groupMemberships.length > 0 ? student.groupMemberships[0].groupId : null;
+    let groupId: string | null = null;
+    if (classId) {
+      // Tìm group của SV trong đúng LHP được yêu cầu
+      const membership = student.groupMemberships.find((gm) => gm.group.classId === classId);
+      groupId = membership?.groupId ?? null;
+    } else if (student.groupMemberships.length > 0) {
+      // Backwards-compat fallback
+      groupId = student.groupMemberships[0].groupId;
+    }
 
-    const submission = await submissionRepository.findStudentSubmissionInClass(student.id, groupId);
+    const submission = classId
+      ? await submissionRepository.findStudentSubmissionInClassByClassId(student.id, groupId, classId)
+      : await submissionRepository.findStudentSubmissionInClass(student.id, groupId);
+
     if (!submission) {
       return null;
     }
