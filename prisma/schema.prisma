@@ -225,6 +225,8 @@ model Submission {
   version         Int      @default(1) @map("PhienBan")
   editRequestNote String?  @map("GhiChuYeuCauSua")
   rejectReason    String?  @map("LyDoTuChoi")
+  // B13: phân loại vi phạm (vd CHO_KIEM_TRA, GIAN_LAN, ...) — trước đây nhét JSON vào rejectReason.
+  violationType   String?  @map("LoaiViPham")
   submittedAt     DateTime @default(now()) @map("NgayNop")
   createdAt       DateTime @default(now()) @map("NgayTao")
   updatedAt       DateTime @updatedAt @map("NgayCapNhat")

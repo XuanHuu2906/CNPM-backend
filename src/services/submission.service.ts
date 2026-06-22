@@ -112,6 +112,8 @@ export class SubmissionService {
       status: SubmissionStatus;
       note?: string;
       rejectReason?: string;
+      // B13: phân loại vi phạm — thay vì nhét JSON vào rejectReason.
+      violationType?: string;
       editRequestNote?: string;
     },
     actorId: string,
@@ -160,6 +162,7 @@ export class SubmissionService {
         status: data.status,
         note: data.note,
         rejectReason: data.rejectReason,
+        violationType: data.violationType,
         editRequestNote: data.editRequestNote,
       },
       actorId
@@ -187,29 +190,27 @@ export class SubmissionService {
       }
     }
 
-    // TODO(B13): hoãn — cần Prisma migration để thêm field `violationType` riêng thay vì parse chuỗi JSON nhúng trong rejectReason.
-    // Nếu có rejectReason chứa thông tin CHO_KIEM_TRA, gửi thêm thông báo cho giảng viên phụ trách
-    if (data.rejectReason && (data.rejectReason.includes('"type":"CHO_KIEM_TRA"') || data.rejectReason.includes('"status":"CHO_KIEM_TRA"'))) {
+    // B13: phân loại vi phạm đã lưu vào field violationType. Backward-compat: vẫn nhận
+    // diện được payload cũ kiểu '{"type":"CHO_KIEM_TRA",...}' nhúng trong rejectReason.
+    const violationType = data.violationType
+      ?? (data.rejectReason && (data.rejectReason.includes('"type":"CHO_KIEM_TRA"') || data.rejectReason.includes('"status":"CHO_KIEM_TRA"'))
+            ? 'CHO_KIEM_TRA'
+            : undefined);
+
+    if (violationType === 'CHO_KIEM_TRA') {
       try {
         const clsId = submission.group?.classId;
         if (clsId) {
           const assignment = await prisma.assignment.findFirst({
             where: { classId: clsId },
-            include: {
-              teacher: true,
-            },
+            include: { teacher: true },
           });
           const teacherUserId = assignment?.teacher?.userId;
           if (teacherUserId) {
-            let parsedLog: any = {};
-            try {
-              parsedLog = JSON.parse(data.rejectReason);
-            } catch (e) {}
-            
             await notificationService.createNotification({
               userId: teacherUserId,
               title: 'Cảnh báo vi phạm báo cáo mới',
-              content: `Admin đã gắn cảnh báo vi phạm [${parsedLog.warningType || parsedLog.violationType || 'Quy chế'}] cho báo cáo ${id}. Lý do: ${parsedLog.reason || ''}. Vui lòng kiểm tra lại.`,
+              content: `Admin đã gắn cảnh báo vi phạm [${violationType}] cho báo cáo ${id}. Lý do: ${data.rejectReason || ''}. Vui lòng kiểm tra lại.`,
               type: 'TRANG_THAI',
               submissionId: id,
             });

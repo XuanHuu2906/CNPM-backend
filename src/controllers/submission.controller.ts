@@ -37,7 +37,7 @@ export class SubmissionController {
   async updateStatus(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { status, note, rejectReason, editRequestNote, version } = req.body;
+      const { status, note, rejectReason, violationType, editRequestNote, version } = req.body;
       const actorId = req.user?.actorId;
 
       if (!actorId) {
@@ -47,7 +47,7 @@ export class SubmissionController {
       const submission = await submissionService.updateStatus(
         id,
         version,
-        { status, note, rejectReason, editRequestNote },
+        { status, note, rejectReason, violationType, editRequestNote },
         actorId,
         req.user!.fullName,
         req.user!.role

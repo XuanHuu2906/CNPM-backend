@@ -276,6 +276,8 @@ export class SubmissionRepository {
       status: SubmissionStatus;
       editRequestNote?: string | null;
       rejectReason?: string | null;
+      // B13: phân loại vi phạm khi từ chối / đưa vào diện kiểm tra.
+      violationType?: string | null;
       note?: string | null;
     },
     actorId: string
@@ -298,6 +300,7 @@ export class SubmissionRepository {
           status: data.status,
           editRequestNote: data.editRequestNote ?? null,
           rejectReason: data.rejectReason ?? null,
+          violationType: data.violationType ?? null,
           version: { increment: 1 },
         },
       });
