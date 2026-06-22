@@ -176,7 +176,8 @@ export class UserService {
       : crypto.randomBytes(9).toString('base64url'); // ~12 ký tự an toàn
 
     const hashedPassword = await SecurityHelper.hashPassword(plaintext);
-    const updatedUser = await userRepository.updatePassword(id, hashedPassword);
+    // UC-13: sau khi admin reset, người dùng phải đổi mật khẩu lần đăng nhập kế tiếp.
+    const updatedUser = await userRepository.updatePassword(id, hashedPassword, true);
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...safeUser } = updatedUser;

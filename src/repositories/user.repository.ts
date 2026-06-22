@@ -98,13 +98,16 @@ export class UserRepository {
   }
 
   /**
-   * Thay đổi mật khẩu người dùng
+   * Thay đổi mật khẩu người dùng.
+   * UC-13: khi admin reset → mustChangePassword=true (buộc đổi lần đăng nhập kế tiếp);
+   *        khi user tự đổi qua /auth/change-password → false.
    */
-  async updatePassword(id: string, passwordHash: string) {
+  async updatePassword(id: string, passwordHash: string, mustChangePassword: boolean = false) {
     return await prisma.user.update({
       where: { id },
       data: {
         password: passwordHash,
+        mustChangePassword,
       },
     });
   }
@@ -172,6 +175,8 @@ export class UserRepository {
           fullName: data.fullName,
           phoneNumber: data.phoneNumber,
           role: data.role,
+          // UC-13: tài khoản do admin tạo thủ công → buộc đổi mật khẩu lần đăng nhập đầu.
+          mustChangePassword: true,
         },
       });
 

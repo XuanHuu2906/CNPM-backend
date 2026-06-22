@@ -48,6 +48,8 @@ export class AuthService {
         role: user.role,
         phoneNumber: user.phoneNumber,
         actorId,
+        // UC-13: FE đọc cờ này để buộc redirect sang /change-password trước khi cho thao tác tiếp.
+        mustChangePassword: user.mustChangePassword,
       },
     };
   }
@@ -67,7 +69,8 @@ export class AuthService {
     }
 
     const passwordHash = await SecurityHelper.hashPassword(newPassword);
-    await userRepository.updatePassword(userId, passwordHash);
+    // UC-13: xóa cờ buộc đổi mật khẩu sau khi đã đổi thành công.
+    await userRepository.updatePassword(userId, passwordHash, false);
 
     return true;
   }
@@ -100,7 +103,8 @@ export class AuthService {
     if (new Date() > record.expiresAt) throw new BadRequestError('Mã xác thực đã hết hạn.');
 
     const passwordHash = await SecurityHelper.hashPassword(newPassword);
-    await userRepository.updatePassword(record.userId, passwordHash);
+    // Reset qua email token: user đã chủ động chọn mật khẩu mới → không cần buộc đổi lại.
+    await userRepository.updatePassword(record.userId, passwordHash, false);
     await passwordResetRepository.markAsUsed(record.id);
 
     return { message: 'Đặt lại mật khẩu thành công.' };

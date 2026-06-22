@@ -356,6 +356,13 @@ async function main() {
   }
   console.log('👤 Created 15 Student accounts across different classes.');
 
+  // UC-13 / S5: tất cả tài khoản seed đều dùng mật khẩu mặc định cố định Password123@ —
+  // bật mustChangePassword để FE buộc đổi mật khẩu lần đăng nhập đầu tiên.
+  await prisma.user.updateMany({
+    data: { mustChangePassword: true },
+  });
+  console.log('🔐 Flagged all seeded accounts as mustChangePassword=true.');
+
   // Create Groups for SE301_L01
   const grp1 = await prisma.group.create({
     data: { name: 'Nhom 1', topicName: 'Xây dựng ứng dụng quản lý rạp chiếu phim', classId: classSe301_L01.id },
