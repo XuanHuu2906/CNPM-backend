@@ -24,7 +24,7 @@ router.get('/profile', authenticate, userController.getProfile);
 router.put('/profile', authenticate, validate(updateProfileSchema), userController.updateProfile);
 
 // 3. Cập nhật ảnh đại diện (avatar)
-router.put('/profile/avatar', authenticate, upload.single('avatar'), userController.updateAvatar);
+router.put('/profile/avatar', authenticate, upload.single('avatar') as any, userController.updateAvatar);
 
 // ==========================================
 // QUẢN TRỊ TÀI KHOẢN (CHỈ DÀNH CHO ADMIN)

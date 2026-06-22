@@ -273,6 +273,10 @@ export class AcademicService {
   }
 
   async createEnrollmentsBatch(enrollments: any[]) {
+    // S4: hạn chế kích thước batch để tránh DoS / cạn bộ nhớ
+    if (enrollments.length > 500) {
+      throw new BadRequestError('Mỗi lần nhập tối đa 500 bản ghi đăng ký lớp');
+    }
     const results = [];
     for (const data of enrollments) {
       try {

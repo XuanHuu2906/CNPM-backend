@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { userRepository } from '../repositories/user.repository';
 import { SecurityHelper } from '../utils/securityHelper';
 import { NotFoundError, BadRequestError } from '../utils/apiResponse';
@@ -160,19 +161,26 @@ export class UserService {
   }
 
   /**
-   * ADMIN: Cấp lại mật khẩu mới cho tài khoản người dùng
+   * ADMIN: Cấp lại mật khẩu mới cho tài khoản người dùng.
+   * S5: nếu admin không truyền mật khẩu, sinh mật khẩu ngẫu nhiên (không dùng default cố định Password123@).
+   * Trả mật khẩu plaintext mới về cho admin để chuyển cho người dùng.
    */
-  async resetPassword(id: string, newPassword: string) {
+  async resetPassword(id: string, newPassword?: string) {
     const user = await userRepository.findById(id);
     if (!user) {
       throw new NotFoundError("Người dùng không tồn tại.");
     }
-    const hashedPassword = await SecurityHelper.hashPassword(newPassword);
+
+    const plaintext = newPassword && newPassword.length >= 8
+      ? newPassword
+      : crypto.randomBytes(9).toString('base64url'); // ~12 ký tự an toàn
+
+    const hashedPassword = await SecurityHelper.hashPassword(plaintext);
     const updatedUser = await userRepository.updatePassword(id, hashedPassword);
-    
+
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...safeUser } = updatedUser;
-    return safeUser;
+    return { ...safeUser, newPassword: plaintext };
   }
 }
 export const userService = new UserService();

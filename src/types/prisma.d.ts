@@ -15,6 +15,7 @@ declare module '@prisma/client' {
     YEU_CAU_SUA = 'YEU_CAU_SUA',
     TU_CHOI = 'TU_CHOI',
     DA_CHAM = 'DA_CHAM',
+    CHO_DUYET = 'CHO_DUYET',
     HOAN_THANH = 'HOAN_THANH'
   }
 }

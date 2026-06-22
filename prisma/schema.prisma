@@ -21,6 +21,7 @@ model User {
   phoneNumber String?  @map("SoDienThoai")
   avatar      String?  @map("AnhDaiDien")
   role        String   @map("VaiTro") // ADMIN | TEACHER | STUDENT | ACADEMIC_DEPT
+  // TODO(B18): chuyển sang Prisma enum UserRole thay vì String để tránh phải monkey-patch trong config/prisma.ts (cần migration).
   isActive    Boolean  @default(true) @map("IsActive")
   createdAt   DateTime @default(now()) @map("NgayTao")
   updatedAt   DateTime @updatedAt @map("NgayCapNhat")

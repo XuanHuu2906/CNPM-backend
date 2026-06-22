@@ -191,6 +191,7 @@ export class AcademicRepository {
                     id: true,
                     name: true,
                     classId: true,
+                    topicName: true,
                   },
                 },
               },

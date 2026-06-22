@@ -35,7 +35,7 @@ export class ReopenRequestService {
     }
 
     // Check status DA_CHAM or CHO_DUYET
-    if (submission.status !== SubmissionStatus.DA_CHAM && submission.status !== 'CHO_DUYET') {
+    if (submission.status !== SubmissionStatus.DA_CHAM && submission.status !== SubmissionStatus.CHO_DUYET) {
       throw new BadRequestError('Chỉ được yêu cầu mở lại khi báo cáo ở trạng thái Đã chấm hoặc Chờ duyệt');
     }
 

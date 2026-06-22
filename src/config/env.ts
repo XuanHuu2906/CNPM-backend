@@ -11,7 +11,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(12, { message: "JWT_SECRET must be at least 12 characters long" }),
   JWT_EXPIRES_IN: z.string().default('7d'),
   CLOUDINARY_URL: z.string({ required_error: "CLOUDINARY_URL là bắt buộc" }).url({ message: "CLOUDINARY_URL phải là một URL hợp lệ" }),
-  RESEND_API_KEY: z.string({ required_error: "RESEND_API_KEY là bắt buộc" }).min(1, "RESEND_API_KEY không được để trống")
+  RESEND_API_KEY: z.string({ required_error: "RESEND_API_KEY là bắt buộc" }).min(1, "RESEND_API_KEY không được để trống"),
+  ALLOWED_ORIGINS: z.string().default('http://localhost:5173'),
 });
 
 // Run validation

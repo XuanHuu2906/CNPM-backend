@@ -122,6 +122,10 @@ export class UserController {
             if (!Array.isArray(users)) {
                 throw new BadRequestError("Dữ liệu danh sách tài khoản không hợp lệ.");
             }
+            // S4: hạn chế kích thước batch để tránh DoS / cạn bộ nhớ
+            if (users.length > 500) {
+                throw new BadRequestError('Mỗi lần nhập tối đa 500 tài khoản người dùng');
+            }
             const results = [];
             for (const userData of users) {
                 try {
