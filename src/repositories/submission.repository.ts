@@ -167,19 +167,48 @@ export class SubmissionRepository {
   }
 
   /**
-   * Tìm bài nộp hiện tại của Sinh viên (hoặc nhóm của sinh viên) trong lớp học phần
+   * Tìm bài nộp hiện tại của Sinh viên (hoặc nhóm của sinh viên) trong lớp học phần.
+   * Sau B17: nếu có groupId, ưu tiên tìm theo group (bài nhóm) trước; fallback theo studentId (bài cá nhân).
    */
   async findStudentSubmissionInClass(studentId: string, groupId: string | null): Promise<any> {
+    if (groupId) {
+      const groupSubmission = await prisma.submission.findFirst({
+        where: { groupId },
+        include: { grades: true },
+      });
+      if (groupSubmission) return this.mapSubmission(groupSubmission);
+    }
+
+    const personalSubmission = await prisma.submission.findFirst({
+      where: { studentId, groupId: null },
+      include: { grades: true },
+    });
+    return this.mapSubmission(personalSubmission);
+  }
+
+  /**
+   * B9: Tìm bài nộp của SV/Nhóm trong một LHP cụ thể (chính xác hơn findStudentSubmissionInClass).
+   * - Bài nhóm: filter submission.groupId in Groups thuộc classId.
+   * - Bài cá nhân: filter submission.studentId = X AND SV có enrollment thuộc classId.
+   */
+  async findStudentSubmissionInClassByClassId(
+    studentId: string,
+    groupId: string | null,
+    classId: string
+  ): Promise<any> {
+    const orClauses: any[] = [];
+    if (groupId) {
+      orClauses.push({ groupId, group: { classId } });
+    }
+    orClauses.push({
+      studentId,
+      groupId: null,
+      student: { enrollments: { some: { classId } } },
+    });
+
     const submission = await prisma.submission.findFirst({
-      where: {
-        OR: [
-          { studentId },
-          groupId ? { groupId } : undefined,
-        ].filter(Boolean) as any,
-      },
-      include: {
-        grades: true,
-      },
+      where: { OR: orClauses },
+      include: { grades: true },
     });
 
     return this.mapSubmission(submission);
