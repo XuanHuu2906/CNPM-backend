@@ -90,6 +90,169 @@ export class SystemService {
   }
 
   // ==========================================
+  // UC-16 (BATCH): PHÊ DUYỆT / TRẢ VỀ NHIỀU BÀI MỘT LẦN
+  // ==========================================
+  // Mỗi item chạy trong transaction riêng:
+  //  - APPROVE: Grade.isApproved=true + submission.status=HOAN_THANH (OCC).
+  //  - RETURN : Grade.isApproved=false + submission.status=DANG_CHAM (OCC), reason bắt buộc.
+  // Item lỗi không làm hỏng phần còn lại — trả về kết quả per-item.
+  async batchApproveGrades(params: {
+    submissionIds: string[];
+    action: 'APPROVE' | 'RETURN';
+    reason?: string;
+    actorId: string;
+  }) {
+    const { submissionIds, action, reason, actorId } = params;
+
+    if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+      throw new BadRequestError('Danh sách bài cần phê duyệt rỗng');
+    }
+    if (submissionIds.length > 100) {
+      throw new BadRequestError('Mỗi lần xử lý tối đa 100 bài để tránh quá tải');
+    }
+    if (action !== 'APPROVE' && action !== 'RETURN') {
+      throw new BadRequestError('Hành động không hợp lệ');
+    }
+    if (action === 'RETURN' && (!reason || !reason.trim())) {
+      throw new BadRequestError('Vui lòng nhập lý do trả về');
+    }
+
+    const uniqueIds = [...new Set(submissionIds)];
+    const results: Array<
+      | { submissionId: string; status: 'SUCCESS' }
+      | { submissionId: string; status: 'FAILED'; reason: string }
+    > = [];
+
+    for (const submissionId of uniqueIds) {
+      try {
+        const submission = await prisma.submission.findUnique({
+          where: { id: submissionId },
+          include: {
+            grades: true,
+            student: { include: { enrollments: { take: 1, orderBy: { createdAt: 'desc' } } } },
+            group: { select: { classId: true } },
+          },
+        });
+        if (!submission) {
+          throw new Error('Không tìm thấy bài nộp');
+        }
+        if (submission.status !== 'CHO_DUYET') {
+          throw new Error(`Bài nộp đang ở trạng thái ${submission.status}, không phải CHO_DUYET`);
+        }
+        const grade = submission.grades[0];
+        if (!grade) {
+          throw new Error('Chưa có điểm chấm');
+        }
+
+        const classId = submission.group?.classId
+          ?? submission.student?.enrollments[0]?.classId
+          ?? null;
+        if (classId) {
+          await academicService.verifyTermActive(classId);
+        }
+
+        const targetStatus = action === 'APPROVE' ? 'HOAN_THANH' : 'DANG_CHAM';
+
+        await prisma.$transaction(async (tx) => {
+          // 1. Grade OCC
+          const updGrade = await tx.grade.updateMany({
+            where: { submissionId, version: grade.version },
+            data: {
+              isApproved: action === 'APPROVE',
+              approvedById: action === 'APPROVE' ? actorId : null,
+              version: { increment: 1 },
+            },
+          });
+          if (updGrade.count === 0) {
+            throw new Error('Bảng điểm đã bị thay đổi (OCC), vui lòng tải lại');
+          }
+
+          // 2. Submission OCC
+          const updSub = await tx.submission.updateMany({
+            where: { id: submissionId, version: submission.version, status: 'CHO_DUYET' },
+            data: {
+              status: targetStatus,
+              rejectReason: action === 'RETURN' ? (reason ?? null) : null,
+              version: { increment: 1 },
+            },
+          });
+          if (updSub.count === 0) {
+            throw new Error('Trạng thái bài nộp đã bị thay đổi (OCC)');
+          }
+
+          // 3. Log
+          await tx.submissionLog.create({
+            data: {
+              submissionId,
+              oldStatus: 'CHO_DUYET',
+              newStatus: targetStatus,
+              actorId,
+              note: action === 'APPROVE'
+                ? 'PĐT phê duyệt (batch UC-16)'
+                : `PĐT trả về chấm lại (batch UC-16): ${reason ?? ''}`,
+            },
+          });
+        });
+
+        // Notify (best-effort)
+        try {
+          const userIds: string[] = [];
+          if (submission.student) {
+            const stu = await prisma.student.findUnique({
+              where: { id: submission.studentId! },
+              select: { userId: true },
+            });
+            if (stu?.userId) userIds.push(stu.userId);
+          }
+          if (submission.group?.classId) {
+            const members = await prisma.groupMember.findMany({
+              where: { groupId: submission.groupId! },
+              include: { student: { select: { userId: true } } },
+            });
+            members.forEach(m => { if (m.student.userId) userIds.push(m.student.userId); });
+          }
+          for (const uid of [...new Set(userIds)]) {
+            await prisma.notification.create({
+              data: {
+                userId: uid,
+                title: action === 'APPROVE' ? 'Kết quả đã được phê duyệt' : 'Bài nộp bị trả về chấm lại',
+                content: action === 'APPROVE'
+                  ? 'Phòng Đào tạo đã phê duyệt kết quả chấm điểm. Bạn có thể xem điểm chính thức.'
+                  : `Phòng Đào tạo trả về bài nộp để chấm lại. Lý do: ${reason ?? ''}`,
+                type: 'TRANG_THAI',
+                submissionId,
+              },
+            });
+          }
+        } catch {
+          // best-effort
+        }
+
+        results.push({ submissionId, status: 'SUCCESS' });
+      } catch (err: any) {
+        results.push({ submissionId, status: 'FAILED', reason: err.message || 'Lỗi không xác định' });
+      }
+    }
+
+    const successCount = results.filter(r => r.status === 'SUCCESS').length;
+    const failedCount = results.length - successCount;
+
+    await this.logAction(
+      actorId,
+      'PHE_DUYET_DIEM_LO',
+      `Duyệt theo lô (${action}): tổng ${uniqueIds.length}, OK ${successCount}, lỗi ${failedCount}${reason ? `, lý do: ${reason}` : ''}`,
+    );
+
+    return {
+      action,
+      totalRequested: uniqueIds.length,
+      successCount,
+      failedCount,
+      results,
+    };
+  }
+
+  // ==========================================
   // PHÊ DUYỆT ĐIỂM (GRADE APPROVALS - UC-16)
   // ==========================================
 

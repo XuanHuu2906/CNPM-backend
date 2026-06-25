@@ -3,6 +3,7 @@ import { ApiResponse, BadRequestError, ForbiddenError } from '../utils/apiRespon
 import { reopenRequestService } from '../services/reopen-request.service';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { auditLog } from '../utils/audit';
 
 export class ReopenRequestController {
   async createRequest(req: Request, res: Response) {
@@ -30,6 +31,13 @@ export class ReopenRequestController {
       teacherUser.fullName
     );
 
+    await auditLog(
+      req.user?.id ?? null,
+      'TAO_YEU_CAU_MO_LAI_CHAM',
+      `GV gửi yêu cầu mở lại chấm điểm cho submission ${submissionId}`,
+      req.ip,
+    );
+
     return ApiResponse.created(res, 'Yêu cầu mở lại chấm điểm đã được gửi đến Phòng Đào tạo', {
       requestId: request.id
     });
@@ -46,6 +54,12 @@ export class ReopenRequestController {
     const { id } = req.params;
     const { reviewNote } = req.body;
     const result = await reopenRequestService.approveRequest(id, req.user!.id, reviewNote);
+    await auditLog(
+      req.user?.id ?? null,
+      'DUYET_YEU_CAU_MO_LAI_CHAM',
+      `PĐT duyệt yêu cầu mở lại chấm ${id}`,
+      req.ip,
+    );
     return ApiResponse.success(res, result.message);
   }
 
@@ -53,6 +67,12 @@ export class ReopenRequestController {
     const { id } = req.params;
     const { reviewNote } = req.body;
     const result = await reopenRequestService.rejectRequest(id, req.user!.id, reviewNote);
+    await auditLog(
+      req.user?.id ?? null,
+      'TU_CHOI_YEU_CAU_MO_LAI_CHAM',
+      `PĐT từ chối yêu cầu mở lại chấm ${id}`,
+      req.ip,
+    );
     return ApiResponse.success(res, result.message);
   }
 }

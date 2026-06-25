@@ -36,17 +36,17 @@ export const createSubjectSchema = z.object({
   }),
 });
 
-export const createClassSchema = z.object({
-  body: z.object({
-    classCode: z.string({ required_error: "Mã lớp học phần là bắt buộc" }).min(2, "Mã lớp phải chứa ít nhất 2 ký tự").toUpperCase(),
-    subjectId: z.string({ required_error: "ID môn học là bắt buộc" }),
-    termId: z.string({ required_error: "ID học kỳ là bắt buộc" }),
-  }),
-});
-
 export const assignTeacherSchema = z.object({
   body: z.object({
     classId: z.string({ required_error: "ID lớp học phần là bắt buộc" }),
     teacherId: z.string({ required_error: "ID giảng viên là bắt buộc" }),
+  }),
+});
+
+// UC-17: đổi GV phụ trách lớp giữa kỳ — lý do bắt buộc.
+export const changeClassTeacherSchema = z.object({
+  body: z.object({
+    newTeacherId: z.string({ required_error: "ID giảng viên mới là bắt buộc" }).min(1),
+    reason: z.string({ required_error: "Lý do đổi giảng viên là bắt buộc" }).min(5, "Lý do phải có ít nhất 5 ký tự"),
   }),
 });

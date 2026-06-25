@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { rubricService } from '../services/rubric.service';
 import { ApiResponse, BadRequestError } from '../utils/apiResponse';
 import { UserRole } from '@prisma/client';
+import { auditLog } from '../utils/audit';
 
 export class RubricController {
   async createRubric(req: Request, res: Response) {
@@ -22,6 +23,13 @@ export class RubricController {
     const rubric = await rubricService.createRubric(
       { title, description, teacherId },
       criteria
+    );
+
+    await auditLog(
+      req.user?.id ?? null,
+      'TAO_RUBRIC',
+      `Tạo rubric "${title}" (teacherId=${teacherId})`,
+      req.ip,
     );
 
     return ApiResponse.created(res, "Thiết lập bảng tiêu chí Rubric thành công", rubric);
@@ -47,6 +55,12 @@ export class RubricController {
   async deleteRubric(req: Request, res: Response) {
     const { id } = req.params;
     await rubricService.deleteRubric(id);
+    await auditLog(
+      req.user?.id ?? null,
+      'XOA_RUBRIC',
+      `Xoá rubric ${id}`,
+      req.ip,
+    );
     return ApiResponse.success(res, "Xóa bảng Rubric thành công");
   }
 }

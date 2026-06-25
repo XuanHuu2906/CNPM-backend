@@ -7,6 +7,7 @@ import { submitReportSchema, updateSubmissionStatusSchema } from '../../validato
 import { UserRole } from '@prisma/client';
 import multer from 'multer';
 import { uploadService } from '../../services/upload.service';
+import { uploadRateLimiter, submitRateLimiter } from '../../middleware/rateLimit';
 
 const router = Router();
 
@@ -31,8 +32,8 @@ const ALLOWED_UPLOAD_EXTS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.
 
 // API tải file thực tế lên Cloudinary và trả về URL bảo mật
 // B16: chỉ Sinh viên / Giảng viên được upload (loại Admin/PĐT để tránh spam Cloudinary quota).
-// TODO: gắn rate-limit khi cài express-rate-limit.
-router.post('/upload', authenticate, authorize(UserRole.STUDENT, UserRole.TEACHER), upload.single('file') as any, async (req, res, next) => {
+// B16: rate-limit 10 req / 5 phút / user để chặn lạm dụng quota Cloudinary và DoS.
+router.post('/upload', authenticate, uploadRateLimiter, authorize(UserRole.STUDENT, UserRole.TEACHER), upload.single('file') as any, async (req, res, next) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Vui lòng cung cấp tệp tin tải lên!' });
@@ -85,7 +86,8 @@ router.post('/upload', authenticate, authorize(UserRole.STUDENT, UserRole.TEACHE
 // ==========================================
 
 // 1. Sinh viên nộp mới hoặc nộp đè bài báo cáo môn học (UC-10)
-router.post('/submit', authenticate, authorize(UserRole.STUDENT), validate(submitReportSchema), submissionController.submitReport);
+// B16: rate-limit 20 req / 5 phút / SV để chặn spam submit/resubmit gây lock OCC liên tục.
+router.post('/submit', authenticate, submitRateLimiter, authorize(UserRole.STUDENT), validate(submitReportSchema), submissionController.submitReport);
 
 // 2. Sinh viên tự xem bài nộp báo cáo của cá nhân hoặc nhóm mình (UC-10, UC-18, UC-22)
 router.get('/my', authenticate, authorize(UserRole.STUDENT), submissionController.getMySubmission);

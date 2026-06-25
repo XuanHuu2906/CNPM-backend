@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { academicController } from '../../controllers/academic.controller';
 import { reopenRequestController } from '../../controllers/reopen-request.controller';
 import { validate } from '../../middleware/validate';
@@ -7,12 +8,18 @@ import {
   createTermSchema,
   updateTermSchema,
   createSubjectSchema,
-  createClassSchema,
   assignTeacherSchema,
+  changeClassTeacherSchema,
 } from '../../validators/academic.validator';
 import { UserRole } from '@prisma/client';
 
 const router = Router();
+
+// Multer in-memory upload cho file Excel template lớp học phần
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
 
 // ==========================================
 // HỌC KỲ (ACADEMIC TERMS)
@@ -41,13 +48,10 @@ router.get('/subjects', authenticate, academicController.getAllSubjects);
 // LỚP HỌC PHẦN (CLASSES)
 // ==========================================
 
-// 6. Tạo mới lớp học phần (PDT/Admin) (UC-13)
-router.post('/classes', authenticate, authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT), validate(createClassSchema), academicController.createClass);
-
-// 7. Lấy danh sách lớp học phần
+// 6. Lấy danh sách lớp học phần
 router.get('/classes', authenticate, academicController.getAllClasses);
 
-// 8. Lấy chi tiết lớp học phần
+// 7. Lấy chi tiết lớp học phần
 router.get('/classes/:id', authenticate, academicController.getClassById);
 
 // ==========================================
@@ -60,18 +64,53 @@ router.post('/assignments', authenticate, authorize(UserRole.ADMIN, UserRole.ACA
 // 10. Hủy phân công giảng viên dạy lớp (PDT/Admin)
 router.delete('/assignments/:classId/:teacherId', authenticate, authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT), academicController.unassignTeacher);
 
+// 10.1 UC-17: Đổi GV phụ trách lớp giữa kỳ (1 thao tác, kèm lý do bắt buộc).
+router.put(
+  '/classes/:classId/teacher',
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT),
+  validate(changeClassTeacherSchema),
+  academicController.changeClassTeacher,
+);
+
+// 10.2 UC-17: Lịch sử thay đổi GV phụ trách của lớp.
+router.get(
+  '/classes/:classId/assignment-history',
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT),
+  academicController.getClassAssignmentHistory,
+);
+
 // ==========================================
-// BATCH IMPORTS (NHẬP HÀNG LOẠT)
+// BATCH IMPORTS (NHẬP HÀNG LOẠT) — chỉ PĐT, Admin chỉ làm kỹ thuật
 // ==========================================
 
-// 11. Nhập học kỳ hàng loạt (PDT/Admin)
-router.post('/terms/batch', authenticate, authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT), academicController.createTermsBatch);
+// 11. Nhập học kỳ hàng loạt
+router.post('/terms/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.createTermsBatch);
 
-// 12. Nhập lớp học phần hàng loạt (PDT/Admin)
-router.post('/classes/batch', authenticate, authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT), academicController.createClassesBatch);
+// 12. Nhập lớp học phần hàng loạt
+router.post('/classes/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.createClassesBatch);
 
-// 13. Nhập đăng ký lớp hàng loạt (PDT/Admin)
-router.post('/enrollments/batch', authenticate, authorize(UserRole.ADMIN, UserRole.ACADEMIC_DEPT), academicController.createEnrollmentsBatch);
+// 13. Nhập đăng ký lớp hàng loạt
+router.post('/enrollments/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.createEnrollmentsBatch);
+
+// 13.5. Import 1 lớp học phần từ file Excel (PĐT upload — 1 file = 1 lớp)
+router.post(
+  '/classes/import-excel',
+  authenticate,
+  authorize(UserRole.ACADEMIC_DEPT),
+  excelUpload.single('file'),
+  academicController.importClassExcel,
+);
+
+// 13.6. Import danh sách sinh viên hàng loạt + gửi mail tài khoản (PĐT)
+router.post(
+  '/students/bulk-import',
+  authenticate,
+  authorize(UserRole.ACADEMIC_DEPT),
+  excelUpload.single('file'),
+  academicController.bulkImportStudents,
+);
 
 // ==========================================
 // YÊU CẦU MỞ LẠI CHẤM ĐIỂM

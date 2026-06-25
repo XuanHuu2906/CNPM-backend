@@ -25,6 +25,15 @@ export class GradeRepository {
           include: { criteria: true },
         },
         submission: true,
+        // UC-17 (R12): trả kèm thông tin GV đã chấm nháp để FE hiển thị badge
+        // "Chấm nháp bởi: GV cũ" khi PĐT đã đổi GV phụ trách giữa kỳ.
+        teacher: {
+          select: {
+            id: true,
+            teacherCode: true,
+            user: { select: { fullName: true } },
+          },
+        },
       },
     });
 

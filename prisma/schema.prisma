@@ -41,6 +41,7 @@ model User {
   backups            Backup[]
   approvals          Approval[]
   reopenRequestReviews GradingReopenRequest[]
+  assignmentChanges  AssignmentHistory[] @relation("AssignmentHistoryActor")
 
   @@map("NguoiDung")
 }
@@ -71,7 +72,9 @@ model Teacher {
   teacherCode String  @unique @map("MaGiangVien")
   title       String? @map("ChucDanh")
   userId      String  @unique @map("NguoiDungID")
+  facultyId   String? @map("KhoaID")
   user        User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  faculty     Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   rubrics     Rubric[]
   assignments Assignment[]
@@ -79,6 +82,8 @@ model Teacher {
   editRequests EditRequest[] @relation("EditRequestTeacher")
   resubmissionRequests ResubmissionRequest[] @relation("ResubmissionRequestTeacher")
   reopenRequests GradingReopenRequest[]
+  oldTeacherHistories AssignmentHistory[] @relation("AssignmentHistoryOldTeacher")
+  newTeacherHistories AssignmentHistory[] @relation("AssignmentHistoryNewTeacher")
 
   @@map("GiangVien")
 }
@@ -88,13 +93,16 @@ model Student {
   id          String  @id @default(cuid()) @map("SinhVienID")
   studentCode String  @unique @map("MSSV")
   userId      String  @unique @map("NguoiDungID")
+  facultyId   String? @map("KhoaID")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  faculty Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   enrollments      ClassEnrollment[]
   groupMemberships GroupMember[]
   submissions      Submission[] @relation("SubmissionStudent")
   resubmissionRequests ResubmissionRequest[] @relation("ResubmissionRequestStudent")
+  gradeAdjustments GradeMemberAdjustment[]
 
   @@map("SinhVien")
 }
@@ -118,7 +126,9 @@ model Subject {
   id          String @id @default(cuid()) @map("MonHocID")
   subjectCode String @unique @map("MaMonHoc")
   name        String @map("TenMonHoc")
+  facultyId   String? @map("KhoaID")
 
+  faculty Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   classes Class[]
 
   @@map("MonHoc")
@@ -137,6 +147,7 @@ model Class {
   enrollments ClassEnrollment[]
   groups      Group[]
   assignments Assignment[]
+  assignmentHistories AssignmentHistory[]
 
   @@map("LopHoc")
 }
@@ -279,8 +290,32 @@ model Grade {
   rubric    Rubric  @relation(fields: [rubricId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  memberAdjustments GradeMemberAdjustment[]
 
   @@map("ChamDiem")
+}
+
+// ---------- GradeMemberAdjustment (DieuChinhDiemThanhVien) ----------
+// UC-09 / UC-I05 mở rộng: GV phụ trách điều chỉnh hệ số đóng góp của từng thành viên trong nhóm
+// để điểm cá nhân = điểm nhóm × contributionFactor (clamp 0–10).
+// Mặc định không tồn tại record nào → tất cả thành viên hưởng điểm nhóm với hệ số 1.0.
+// Chỉ áp dụng khi submission ở trạng thái DA_NOP / DANG_CHAM / DA_CHAM (chưa CHO_DUYET / HOAN_THANH).
+model GradeMemberAdjustment {
+  id                 String   @id @default(cuid()) @map("DieuChinhID")
+  gradeId            String   @map("ChamDiemID")
+  studentId          String   @map("SinhVienID")
+  contributionFactor Decimal  @default(1.0) @map("HeSoDongGop") @db.Decimal(3, 2)
+  note               String?  @map("GhiChu")
+  adjustedById       String   @map("NguoiDieuChinh")
+  createdAt          DateTime @default(now()) @map("NgayDieuChinh")
+  updatedAt          DateTime @updatedAt @map("NgayCapNhat")
+
+  grade   Grade   @relation(fields: [gradeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([gradeId, studentId])
+  @@index([studentId])
+  @@map("DieuChinhDiemThanhVien")
 }
 
 // ---------- SystemConfig (CauHinhHeThong) ----------
@@ -473,10 +508,14 @@ enum GradingReopenRequestStatus {
 
 // ---------- Faculty (Khoa) ----------
 model Faculty {
-  id       String @id @default(cuid()) @map("KhoaID")
-  code     String @unique @map("MaKhoa")
-  name     String @map("TenKhoa")
+  id          String  @id @default(cuid()) @map("KhoaID")
+  code        String  @unique @map("MaKhoa")
+  name        String  @map("TenKhoa")
   description String? @map("MoTa")
+
+  teachers Teacher[]
+  students Student[]
+  subjects Subject[]
 
   @@map("Khoa")
 }
@@ -518,6 +557,7 @@ model GroupMember {
   id        String   @id @default(cuid()) @map("ThanhVienNhomID")
   groupId   String   @map("NhomID")
   studentId String   @map("SinhVienID")
+  isLeader  Boolean  @default(false) @map("IsNhomTruong")
   joinedAt  DateTime @default(now()) @map("NgayThamGia")
 
   group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -528,15 +568,30 @@ model GroupMember {
 }
 
 // ---------- AssignmentHistory (LichSuPhanCong) ----------
+// UC-17: lưu vết khi PĐT đổi GV phụ trách lớp giữa kỳ.
+// Lưu ý: ta KHÔNG đụng vào Grade.teacherId của các điểm nháp/đã chấm cũ — GV mới được phép sửa
+// nháp qua kiểm tra Assignment hiện tại (verifyTeacherClassOwnership), còn audit ai chấm nháp
+// vẫn truy được qua Grade.teacherId + AssignmentHistory.
+// Cột PhanCongID (assignmentId) lưu lại id Assignment cũ tại thời điểm thay đổi để truy nguồn,
+// KHÔNG khai báo FK cứng vì Assignment cũ sẽ bị xóa khi đổi GV → tránh cascade làm mất lịch sử.
 model AssignmentHistory {
   id           String   @id @default(cuid()) @map("LichSuPhanCongID")
-  assignmentId String   @map("PhanCongID")
+  classId      String   @map("LopHocID")
+  assignmentId String?  @map("PhanCongID")
   oldTeacherId String   @map("GiangVienCuID")
   newTeacherId String   @map("GiangVienMoiID")
   reason       String   @map("LyDo")
   changedById  String   @map("NguoiThucHien")
   createdAt    DateTime @default(now()) @map("NgayThayDoi")
 
+  class      Class      @relation(fields: [classId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  oldTeacher Teacher    @relation("AssignmentHistoryOldTeacher", fields: [oldTeacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  newTeacher Teacher    @relation("AssignmentHistoryNewTeacher", fields: [newTeacherId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  changedBy  User       @relation("AssignmentHistoryActor", fields: [changedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([classId])
+  @@index([oldTeacherId])
+  @@index([newTeacherId])
   @@map("LichSuPhanCong")
 }
 

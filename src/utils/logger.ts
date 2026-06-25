@@ -31,18 +31,25 @@ const format = winston.format.combine(
   )
 );
 
-const transports = [
+const transports: winston.transport[] = [
   new winston.transports.Console({ format }),
-  new winston.transports.File({
-    filename: 'logs/error.log',
-    level: 'error',
-    format: winston.format.json(),
-  }),
-  new winston.transports.File({
-    filename: 'logs/combined.log',
-    format: winston.format.json(),
-  }),
 ];
+
+// File transports chỉ dùng ở local — trên Render filesystem ephemeral,
+// log sẽ mất khi service restart. Render tự capture stdout/stderr rồi.
+if (env.NODE_ENV !== 'production') {
+  transports.push(
+    new winston.transports.File({
+      filename: 'logs/error.log',
+      level: 'error',
+      format: winston.format.json(),
+    }),
+    new winston.transports.File({
+      filename: 'logs/combined.log',
+      format: winston.format.json(),
+    })
+  );
+}
 
 export const logger = winston.createLogger({
   level: level(),

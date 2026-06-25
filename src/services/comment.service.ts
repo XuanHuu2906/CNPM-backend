@@ -17,10 +17,15 @@ export class CommentService {
     return await commentRepository.findBySubmissionId(submissionId);
   }
 
-  async deleteComment(commentId: string, userId: string) {
+  /**
+   * B20: chỉ chủ ghi chú (hoặc Admin) được xoá.
+   */
+  async deleteComment(commentId: string, userId: string, isAdmin: boolean = false) {
     const comment = await commentRepository.findById(commentId);
-    if (!comment) throw new NotFoundError('Bình luận không tồn tại');
-    if (comment.userId !== userId) throw new ForbiddenError('Bạn không có quyền xóa bình luận này');
+    if (!comment) throw new NotFoundError('Ghi chú nội bộ không tồn tại');
+    if (!isAdmin && comment.userId !== userId) {
+      throw new ForbiddenError('Bạn không có quyền xoá ghi chú nội bộ này');
+    }
 
     return await commentRepository.softDelete(commentId);
   }

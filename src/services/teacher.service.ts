@@ -1,7 +1,16 @@
+import ExcelJS from 'exceljs';
 import { prisma } from '../config/prisma';
 import { academicService } from './academic.service';
 import { academicRepository } from '../repositories/academic.repository';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../utils/apiResponse';
+import { SecurityHelper } from '../utils/securityHelper';
+import { SubmissionStatus, UserRole } from '@prisma/client';
+
+const isRedFont = (argb?: string) => {
+  if (!argb) return false;
+  const u = argb.toUpperCase();
+  return u === 'FFFF0000' || u === 'FF0000';
+};
 
 export class TeacherService {
   /**
@@ -15,6 +24,100 @@ export class TeacherService {
       throw new ForbiddenError("Bạn không được phân công phụ trách lớp học phần này");
     }
     return assignment;
+  }
+
+  /**
+   * UC-16 (Luồng thay thế): GV "Gửi duyệt cả lớp" — chuyển toàn bộ bài DA_CHAM của lớp
+   * sang CHO_DUYET trong 1 thao tác để PĐT duyệt theo lô. Quy tắc:
+   *  - Chỉ GV phụ trách lớp được gọi.
+   *  - Bỏ qua bài chưa có Grade (chưa chấm), bài ở trạng thái khác DA_CHAM, học kỳ đã khóa.
+   *  - Mỗi bài chuyển status với OCC (tránh race với GV khác hoặc chính GV đang chấm).
+   */
+  async submitClassForReview(classId: string, teacherId: string, actorUserId: string) {
+    await this.verifyOwnership(classId, teacherId);
+    await academicService.verifyTermActive(classId);
+
+    // Lấy mọi bài thuộc lớp đang ở DA_CHAM kèm Grade
+    const submissions = await prisma.submission.findMany({
+      where: {
+        OR: [
+          { group: { classId } },
+          { student: { enrollments: { some: { classId } } } },
+        ],
+        status: SubmissionStatus.DA_CHAM,
+      },
+      include: {
+        grades: { select: { id: true } },
+      },
+    });
+
+    const eligible = submissions.filter(s => s.grades.length > 0);
+    const skipped = submissions
+      .filter(s => s.grades.length === 0)
+      .map(s => ({ submissionId: s.id, reason: 'Chưa có điểm chấm' }));
+
+    const moved: string[] = [];
+    const failures: Array<{ submissionId: string; reason: string }> = [];
+
+    for (const sub of eligible) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.submission.updateMany({
+            where: { id: sub.id, version: sub.version, status: SubmissionStatus.DA_CHAM },
+            data: { status: SubmissionStatus.CHO_DUYET, version: { increment: 1 } },
+          });
+          if (updated.count === 0) {
+            throw new BadRequestError('OCC mismatch hoặc trạng thái đã đổi');
+          }
+          await tx.submissionLog.create({
+            data: {
+              submissionId: sub.id,
+              oldStatus: SubmissionStatus.DA_CHAM,
+              newStatus: SubmissionStatus.CHO_DUYET,
+              actorId: actorUserId,
+              note: 'GV gửi duyệt cả lớp (UC-16 batch)',
+            },
+          });
+        });
+        moved.push(sub.id);
+      } catch (err: any) {
+        failures.push({ submissionId: sub.id, reason: err.message || 'Lỗi không xác định' });
+      }
+    }
+
+    // 1 thông báo gộp cho PĐT thay vì 1 notification/bài (R8).
+    if (moved.length > 0) {
+      try {
+        const classRecord = await prisma.class.findUnique({
+          where: { id: classId },
+          select: { classCode: true },
+        });
+        const pdtUsers = await prisma.user.findMany({
+          where: { role: { in: [UserRole.ACADEMIC_DEPT, UserRole.ADMIN] }, isActive: true },
+          select: { id: true },
+        });
+        if (pdtUsers.length > 0) {
+          await prisma.notification.createMany({
+            data: pdtUsers.map(u => ({
+              userId: u.id,
+              title: `Lớp ${classRecord?.classCode ?? classId} đã gửi duyệt`,
+              content: `Giảng viên phụ trách đã chấm xong và gửi ${moved.length} bài của lớp ${classRecord?.classCode ?? classId} sang Chờ duyệt.`,
+              type: 'HE_THONG',
+            })),
+          });
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
+    return {
+      classId,
+      movedCount: moved.length,
+      skippedCount: skipped.length,
+      failedCount: failures.length,
+      skipped: skipped.concat(failures),
+    };
   }
 
   /**
@@ -379,6 +482,224 @@ export class TeacherService {
       }
 
       return createdGroups;
+    });
+  }
+
+  /**
+   * Import nhóm + thành viên + nhóm trưởng từ file Excel (DanhSachSinhVien_CNPM.xlsx).
+   * - Sheet "Điểm Danh": header tại row 7, data từ row 8
+   * - Cột: A=STT, B=MSSV, C=Họ lót, D=Tên, E=Nhóm, F=Tên nhóm, G=Đề tài
+   * - Nhóm trưởng: chữ in đỏ (font color ARGB FFFF0000) ở cột C/D
+   * - Forward-fill: cột E/F/G chỉ điền ở dòng đầu mỗi nhóm
+   * - SV chưa có trong DB: auto-tạo User (mustChangePassword=true) + Student + ClassEnrollment
+   */
+  async importGroupsFromExcel(classId: string, teacherId: string, fileBuffer: Buffer) {
+    await this.verifyOwnership(classId, teacherId);
+    await academicService.verifyTermActive(classId);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(fileBuffer as any);
+
+    const sheet =
+      workbook.getWorksheet('Điểm Danh') ||
+      workbook.getWorksheet('Diem Danh') ||
+      workbook.worksheets[0];
+    if (!sheet) throw new BadRequestError('File Excel không có sheet nào');
+
+    type ParsedMember = { studentCode: string; fullName: string; isLeader: boolean };
+    type ParsedGroup = { groupNo: number; name: string; topicName: string; members: ParsedMember[] };
+
+    const groupsByNo = new Map<number, ParsedGroup>();
+    let currentGroupNo: number | null = null;
+    const seenCodes = new Set<string>();
+
+    const HEADER_ROW = 7;
+    const lastRow = sheet.actualRowCount || sheet.rowCount;
+
+    for (let r = HEADER_ROW + 1; r <= lastRow; r++) {
+      const row = sheet.getRow(r);
+      const mssvCell = row.getCell(2);
+      const mssv = (mssvCell.value ? String(mssvCell.value).trim() : '');
+      if (!mssv) continue;
+      if (seenCodes.has(mssv)) {
+        throw new BadRequestError(`MSSV trùng trong file: ${mssv}`);
+      }
+      seenCodes.add(mssv);
+
+      const hoLot = String(row.getCell(3).value ?? '').trim();
+      const ten = String(row.getCell(4).value ?? '').trim();
+      const fullName = `${hoLot} ${ten}`.replace(/\s+/g, ' ').trim();
+
+      const nhomRaw = row.getCell(5).value;
+      const tenNhomRaw = String(row.getCell(6).value ?? '').trim();
+      const deTaiRaw = String(row.getCell(7).value ?? '').trim();
+
+      if (nhomRaw !== null && nhomRaw !== undefined && nhomRaw !== '') {
+        const n = Number(nhomRaw);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new BadRequestError(`Dòng ${r}: số nhóm không hợp lệ (${nhomRaw})`);
+        }
+        currentGroupNo = n;
+        if (!groupsByNo.has(n)) {
+          groupsByNo.set(n, {
+            groupNo: n,
+            name: tenNhomRaw || `Nhóm ${n}`,
+            topicName: deTaiRaw,
+            members: [],
+          });
+        } else {
+          const g = groupsByNo.get(n)!;
+          if (tenNhomRaw) g.name = tenNhomRaw;
+          if (deTaiRaw) g.topicName = deTaiRaw;
+        }
+      }
+      if (currentGroupNo === null) {
+        throw new BadRequestError(`Dòng ${r}: SV ${mssv} chưa thuộc nhóm nào (số nhóm trống ở dòng đầu)`);
+      }
+
+      // Detect leader: cột C hoặc D có font đỏ
+      const cFont = row.getCell(3).font;
+      const dFont = row.getCell(4).font;
+      const isLeader = isRedFont(cFont?.color?.argb) || isRedFont(dFont?.color?.argb);
+
+      groupsByNo.get(currentGroupNo)!.members.push({
+        studentCode: mssv.toUpperCase(),
+        fullName: fullName || mssv,
+        isLeader,
+      });
+    }
+
+    if (groupsByNo.size === 0) {
+      throw new BadRequestError('Không tìm thấy dữ liệu nhóm hợp lệ trong file');
+    }
+
+    // Validate: mỗi nhóm tối đa 1 leader (có thể 0 nếu file thiếu)
+    for (const g of groupsByNo.values()) {
+      const leaders = g.members.filter(m => m.isLeader);
+      if (leaders.length > 1) {
+        throw new BadRequestError(`Nhóm ${g.groupNo} (${g.name}) có ${leaders.length} nhóm trưởng (chữ đỏ); chỉ được 1`);
+      }
+    }
+
+    // Check group name conflict với DB
+    const existingGroups = await prisma.group.findMany({
+      where: { classId, name: { in: [...groupsByNo.values()].map(g => g.name) } },
+      select: { name: true },
+    });
+    if (existingGroups.length > 0) {
+      throw new BadRequestError(
+        `Các nhóm sau đã tồn tại trong lớp: ${existingGroups.map(g => g.name).join(', ')}`
+      );
+    }
+
+    // Pre-load students hiện có để biết ai cần auto-create
+    const allCodes = [...seenCodes].map(c => c.toUpperCase());
+    const existingStudents = await prisma.student.findMany({
+      where: { studentCode: { in: allCodes } },
+      include: {
+        user: { select: { fullName: true } },
+        groupMemberships: {
+          where: { group: { classId } },
+          select: { id: true, group: { select: { name: true } } },
+        },
+      },
+    });
+    const studentByCode = new Map(existingStudents.map(s => [s.studentCode.toUpperCase(), s]));
+
+    // SV đã thuộc nhóm khác trong lớp này → từ chối
+    const alreadyGrouped = existingStudents.filter(s => s.groupMemberships.length > 0);
+    if (alreadyGrouped.length > 0) {
+      throw new BadRequestError(
+        `Các sinh viên sau đã thuộc nhóm khác trong lớp này: ${alreadyGrouped
+          .map(s => `${s.studentCode} (nhóm ${s.groupMemberships[0].group.name})`)
+          .join(', ')}`
+      );
+    }
+
+    // Lấy classCode để generate email default cho SV mới
+    const classRecord = await prisma.class.findUnique({ where: { id: classId }, select: { classCode: true } });
+    const defaultPasswordHash = await SecurityHelper.hashPassword('123456');
+
+    return await prisma.$transaction(async (tx) => {
+      let createdUsersCount = 0;
+      let enrolledCount = 0;
+
+      // Auto-create SV còn thiếu
+      for (const g of groupsByNo.values()) {
+        for (const m of g.members) {
+          if (studentByCode.has(m.studentCode)) continue;
+          const email = `${m.studentCode.toLowerCase()}@stu.local`;
+          // Defensive: nếu email/MSSV đã tồn tại do race → skip; nhưng đã check ở trên
+          const user = await tx.user.create({
+            data: {
+              email,
+              password: defaultPasswordHash,
+              fullName: m.fullName,
+              role: 'STUDENT',
+              isActive: true,
+              mustChangePassword: true,
+              student: {
+                create: { studentCode: m.studentCode },
+              },
+            },
+            include: { student: true },
+          });
+          createdUsersCount++;
+          studentByCode.set(m.studentCode, {
+            ...user.student!,
+            user: { fullName: user.fullName },
+            groupMemberships: [],
+          } as any);
+        }
+      }
+
+      // Đảm bảo tất cả SV đã enroll vào class
+      const studentIds = [...studentByCode.values()].map(s => s.id);
+      const existingEnrollments = await tx.classEnrollment.findMany({
+        where: { classId, studentId: { in: studentIds } },
+        select: { studentId: true },
+      });
+      const enrolledIds = new Set(existingEnrollments.map(e => e.studentId));
+      const toEnroll = studentIds.filter(id => !enrolledIds.has(id));
+      if (toEnroll.length > 0) {
+        await tx.classEnrollment.createMany({
+          data: toEnroll.map(studentId => ({ studentId, classId })),
+        });
+        enrolledCount = toEnroll.length;
+      }
+
+      // Tạo Group + GroupMember (kèm isLeader)
+      const createdGroups: any[] = [];
+      for (const g of [...groupsByNo.values()].sort((a, b) => a.groupNo - b.groupNo)) {
+        const group = await tx.group.create({
+          data: { name: g.name, topicName: g.topicName || '', classId },
+        });
+        await tx.groupMember.createMany({
+          data: g.members.map(m => ({
+            groupId: group.id,
+            studentId: studentByCode.get(m.studentCode)!.id,
+            isLeader: m.isLeader,
+          })),
+        });
+        createdGroups.push({
+          id: group.id,
+          groupNo: g.groupNo,
+          name: g.name,
+          topicName: g.topicName,
+          memberCount: g.members.length,
+          leaderCode: g.members.find(m => m.isLeader)?.studentCode ?? null,
+        });
+      }
+
+      return {
+        classCode: classRecord?.classCode ?? null,
+        groupCount: createdGroups.length,
+        memberCount: createdGroups.reduce((s, g) => s + g.memberCount, 0),
+        leaderCount: createdGroups.filter(g => g.leaderCode).length,
+        createdUsersCount,
+        enrolledCount,
+        groups: createdGroups,
+      };
     });
   }
 }
