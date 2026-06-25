@@ -151,6 +151,14 @@ export class UserController {
                     results.push({ success: false, email: userData.email, error: err.message });
                 }
             }
+            const successCount = results.filter((r) => r.success).length;
+            // UC-I04: ghi audit batch import tài khoản
+            await auditLog(
+                req.user?.id ?? null,
+                'IMPORT_TAI_KHOAN_BATCH',
+                `Admin import batch ${users.length} tài khoản (thành công ${successCount}/${users.length})`,
+                req.ip,
+            );
             return ApiResponse.success(res, "Thực thi nhập hàng loạt hoàn tất", results);
         } catch (error) {
             return next(error);

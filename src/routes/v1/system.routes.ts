@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { systemController } from '../../controllers/system.controller';
 import { validate } from '../../middleware/validate';
 import { authenticate, authorize } from '../../middleware/auth';
-import { approveGradeSchema, updateConfigSchema, restoreDbSchema } from '../../validators/system.validator';
+import { approveGradeSchema, updateConfigSchema, restoreDbSchema, batchApproveGradesSchema } from '../../validators/system.validator';
 import { UserRole } from '@prisma/client';
 
 const router = Router();
@@ -13,6 +13,15 @@ const router = Router();
 
 // 1. PDT / Admin phê duyệt hoặc gỡ phê duyệt bảng điểm kèm OCC (UC-16)
 router.put('/grades/:submissionId/approve', authenticate, authorize(UserRole.ACADEMIC_DEPT, UserRole.ADMIN), validate(approveGradeSchema), systemController.approveGrade);
+
+// 1.5 UC-16 (BATCH): Phê duyệt / trả về nhiều bài cùng lúc.
+router.post(
+  '/grades/batch-approve',
+  authenticate,
+  authorize(UserRole.ACADEMIC_DEPT, UserRole.ADMIN),
+  validate(batchApproveGradesSchema),
+  systemController.batchApproveGrades,
+);
 
 // 2. Admin cập nhật tham số cấu hình hệ thống (UC-14)
 router.put('/configs', authenticate, authorize(UserRole.ADMIN), validate(updateConfigSchema), systemController.updateConfig);

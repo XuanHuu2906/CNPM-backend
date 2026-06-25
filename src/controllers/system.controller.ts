@@ -6,6 +6,25 @@ import fs from 'fs';
 import path from 'path';
 
 export class SystemController {
+  // UC-16: Phê duyệt theo lô — PĐT chọn nhiều bài để phê duyệt hoặc trả về cùng lúc.
+  async batchApproveGrades(req: Request, res: Response) {
+    const { submissionIds, action, reason } = req.body || {};
+    const actorId = req.user?.actorId;
+    if (!actorId) {
+      throw new BadRequestError('Yêu cầu xác thực Phòng Đào Tạo / Admin');
+    }
+    const result = await systemService.batchApproveGrades({
+      submissionIds,
+      action,
+      reason,
+      actorId,
+    });
+    const message = action === 'APPROVE'
+      ? `Đã phê duyệt ${result.successCount}/${result.totalRequested} bài`
+      : `Đã trả về ${result.successCount}/${result.totalRequested} bài`;
+    return ApiResponse.success(res, message, result);
+  }
+
   async approveGrade(req: Request, res: Response) {
     const { submissionId } = req.params;
     const { isApproved, version } = req.body;

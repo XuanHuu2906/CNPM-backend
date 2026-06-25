@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { resubmissionRequestService } from '../services/resubmission-request.service';
 import { ApiResponse } from '../utils/apiResponse';
+import { auditLog } from '../utils/audit';
 
 export class ResubmissionRequestController {
   // POST /v1/resubmission-requests
@@ -18,7 +19,15 @@ export class ResubmissionRequestController {
       }
 
       const request = await resubmissionRequestService.createRequest(studentId, submissionId, reason);
-      
+
+      // UC-I04: ghi audit yêu cầu nộp lại
+      await auditLog(
+        req.user?.id ?? null,
+        'TAO_YEU_CAU_NOP_LAI',
+        `SV gửi yêu cầu nộp lại cho submission ${submissionId}`,
+        req.ip,
+      );
+
       return ApiResponse.created(res, "Gửi yêu cầu xin nộp lại thành công.", request);
     } catch (error) {
       next(error);
@@ -68,12 +77,24 @@ export class ResubmissionRequestController {
 
       if (status === 'DA_DUYET') {
         const result = await resubmissionRequestService.approveRequest(requestId, teacherId, feedbackNote);
+        await auditLog(
+          req.user?.id ?? null,
+          'DUYET_YEU_CAU_NOP_LAI',
+          `GV duyệt yêu cầu nộp lại ${requestId}`,
+          req.ip,
+        );
         return ApiResponse.success(res, "Đã duyệt yêu cầu nộp lại.", result);
       } else if (status === 'TU_CHOI') {
         if (!feedbackNote) {
           return res.status(400).json({ success: false, message: "Vui lòng nhập lý do từ chối." });
         }
         const result = await resubmissionRequestService.rejectRequest(requestId, teacherId, feedbackNote);
+        await auditLog(
+          req.user?.id ?? null,
+          'TU_CHOI_YEU_CAU_NOP_LAI',
+          `GV từ chối yêu cầu nộp lại ${requestId}`,
+          req.ip,
+        );
         return ApiResponse.success(res, "Đã từ chối yêu cầu nộp lại.", result);
       } else {
         return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ." });

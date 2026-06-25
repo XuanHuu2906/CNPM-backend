@@ -8,7 +8,7 @@ import groupRouter from './v1/group.routes';
 import submissionRouter from './v1/submission.routes';
 import gradeRouter from './v1/grade.routes';
 import systemRouter from './v1/system.routes';
-import commentRouter from './v1/comment.routes';
+import internalNoteRouter from './v1/comment.routes';
 import editRequestRouter from './v1/edit-request.routes';
 import notificationRouter from './v1/notification.routes';
 import resubmissionRequestRouter from './v1/resubmission-request.routes';
@@ -49,8 +49,10 @@ router.use('/grades', gradeRouter);
 // 9. Phân hệ Quản trị hệ thống & Tiện ích (System Module)
 router.use('/system', systemRouter);
 
-// 10. Phân hệ Bình luận (Comment Module - UC-22)
-router.use('/comments', commentRouter);
+// 10. Phân hệ Ghi chú nội bộ giảng viên (Internal Notes Module - R7-compliant)
+// B20: rename từ /comments để tuân thủ R7 (không cho phép chat tự do GV-SV).
+// Chỉ GV/Admin/PĐT mới truy cập được; SV không có quyền đọc/ghi.
+router.use('/internal-notes', internalNoteRouter);
 
 // 11. Phân hệ Yêu cầu chỉnh sửa (Edit Request Module - UC-10)
 router.use('/edit-requests', editRequestRouter);

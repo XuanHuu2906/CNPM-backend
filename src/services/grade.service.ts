@@ -29,7 +29,10 @@ export class GradeService {
       throw new NotFoundError("Không tìm thấy thông tin bài báo cáo bài nộp cần chấm điểm");
     }
 
-    // B5: Xác minh GV được phân công LHP của bài nộp này.
+    // B5 / UC-17 (R12): Xác minh GV được phân công LHP của bài nộp này (Assignment-based,
+    // KHÔNG so sánh với existingGrade.teacherId). Lý do: khi PĐT đổi GV phụ trách giữa kỳ,
+    // điểm nháp của GV cũ vẫn còn (Grade.teacherId giữ nguyên để audit), nhưng GV mới phải sửa
+    // được. Đừng thêm check `existingGrade.teacherId === teacherId` ở dưới — sẽ break UC-17.
     // B8: nếu bài nộp cá nhân (không group), lookup classId qua Enrollment của SV.
     let classId: string | undefined = submission.group?.classId;
     if (!classId && submission.studentId) {
@@ -161,6 +164,183 @@ export class GradeService {
     }
     return grade;
   }
+
+  // ==========================================
+  // UC-09 / UC-I05 EXT: ĐIỀU CHỈNH HỆ SỐ ĐÓNG GÓP THÀNH VIÊN NHÓM
+  // ==========================================
+  // Quy tắc R11:
+  //  - Điểm nhóm áp 100% cho mọi thành viên mặc định (hệ số 1.0).
+  //  - GV phụ trách lớp được điều chỉnh hệ số 0–1.5 trước khi gửi duyệt (CHO_DUYET).
+  //  - Đóng băng sau khi bài chuyển sang CHO_DUYET / HOAN_THANH (PĐT đã / đang duyệt).
+  //  - Áp dụng cho submission có groupId (bài nhóm). Bài cá nhân: không áp dụng.
+  async setMemberAdjustments(
+    submissionId: string,
+    teacherId: string,
+    actorUserId: string,
+    items: Array<{ studentId: string; contributionFactor: number; note?: string }>,
+  ) {
+    const submission = await submissionRepository.findSubmissionById(submissionId);
+    if (!submission) {
+      throw new NotFoundError('Không tìm thấy bài nộp');
+    }
+    if (!submission.groupId) {
+      throw new BadRequestError('Bài nộp cá nhân không có hệ số đóng góp thành viên');
+    }
+    const classId = submission.group?.classId;
+    if (!classId) {
+      throw new BadRequestError('Không xác định được lớp học phần của bài nộp');
+    }
+
+    await verifyTeacherClassOwnership(classId, teacherId);
+    await academicService.verifyTermActive(classId);
+
+    // Khóa sau khi gửi duyệt — PĐT đã / đang xét.
+    if (
+      submission.status === SubmissionStatus.CHO_DUYET ||
+      submission.status === SubmissionStatus.HOAN_THANH
+    ) {
+      throw new ForbiddenError('Bài nộp đang chờ duyệt hoặc đã hoàn thành — không thể điều chỉnh hệ số đóng góp');
+    }
+
+    const grade = await gradeRepository.findGradeBySubmissionId(submissionId);
+    if (!grade) {
+      throw new BadRequestError('Chưa có điểm chấm — vui lòng chấm điểm nhóm trước khi điều chỉnh hệ số');
+    }
+
+    // Validate items
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new BadRequestError('Danh sách điều chỉnh hệ số rỗng');
+    }
+    const groupMembers = await prisma.groupMember.findMany({
+      where: { groupId: submission.groupId },
+      select: { studentId: true },
+    });
+    const memberIds = new Set(groupMembers.map(m => m.studentId));
+    const seen = new Set<string>();
+    for (const it of items) {
+      if (!memberIds.has(it.studentId)) {
+        throw new BadRequestError(`Sinh viên ${it.studentId} không thuộc nhóm của bài nộp này`);
+      }
+      if (seen.has(it.studentId)) {
+        throw new BadRequestError(`Sinh viên ${it.studentId} bị trùng trong danh sách điều chỉnh`);
+      }
+      seen.add(it.studentId);
+      if (typeof it.contributionFactor !== 'number' || Number.isNaN(it.contributionFactor)) {
+        throw new BadRequestError('Hệ số đóng góp phải là số');
+      }
+      if (it.contributionFactor < 0 || it.contributionFactor > 1.5) {
+        throw new BadRequestError(`Hệ số đóng góp phải nằm trong [0, 1.5] (gửi: ${it.contributionFactor})`);
+      }
+    }
+
+    // Upsert per item.
+    await prisma.$transaction(async (tx) => {
+      for (const it of items) {
+        await tx.gradeMemberAdjustment.upsert({
+          where: { gradeId_studentId: { gradeId: grade.id, studentId: it.studentId } },
+          create: {
+            gradeId: grade.id,
+            studentId: it.studentId,
+            contributionFactor: it.contributionFactor,
+            note: it.note?.trim() || null,
+            adjustedById: actorUserId,
+          },
+          update: {
+            contributionFactor: it.contributionFactor,
+            note: it.note?.trim() || null,
+            adjustedById: actorUserId,
+          },
+        });
+      }
+    });
+
+    return await this.getGradeWithMemberScores(submissionId);
+  }
+
+  /**
+   * Trả về điểm nhóm + danh sách thành viên kèm hệ số + điểm cá nhân tính sẵn.
+   * Nếu requestStudentId truyền vào: lọc chỉ trả record của SV đó (R5/R6 cho SV).
+   */
+  async getGradeWithMemberScores(submissionId: string, requestStudentId?: string) {
+    const submission = await submissionRepository.findSubmissionById(submissionId);
+    if (!submission) {
+      throw new NotFoundError('Không tìm thấy bài nộp');
+    }
+
+    const grade = await gradeRepository.findGradeBySubmissionId(submissionId);
+    if (!grade) {
+      throw new NotFoundError('Bài nộp này chưa có điểm chấm');
+    }
+
+    // Bài cá nhân — không có nhóm.
+    if (!submission.groupId) {
+      const member = submission.studentId === requestStudentId || !requestStudentId
+        ? [{
+            studentId: submission.studentId!,
+            fullName: submission.student?.user?.fullName ?? null,
+            studentCode: submission.student?.studentCode ?? null,
+            contributionFactor: 1,
+            note: null as string | null,
+            personalScore: clampPersonalScore(Number(grade.finalScore) * 1),
+          }]
+        : [];
+      return {
+        submissionId,
+        groupId: null,
+        groupScore: Number(grade.finalScore),
+        members: member,
+      };
+    }
+
+    const members = await prisma.groupMember.findMany({
+      where: { groupId: submission.groupId },
+      include: {
+        student: {
+          select: {
+            id: true,
+            studentCode: true,
+            user: { select: { fullName: true } },
+          },
+        },
+      },
+    });
+
+    const adjustments = await prisma.gradeMemberAdjustment.findMany({
+      where: { gradeId: grade.id },
+    });
+    const adjByStudent = new Map(adjustments.map(a => [a.studentId, a]));
+
+    const groupScore = Number(grade.finalScore);
+    let memberRows = members.map(m => {
+      const adj = adjByStudent.get(m.studentId);
+      const factor = adj ? Number(adj.contributionFactor) : 1;
+      return {
+        studentId: m.studentId,
+        fullName: m.student.user.fullName,
+        studentCode: m.student.studentCode,
+        contributionFactor: factor,
+        note: adj?.note ?? null,
+        personalScore: clampPersonalScore(groupScore * factor),
+      };
+    });
+
+    if (requestStudentId) {
+      memberRows = memberRows.filter(r => r.studentId === requestStudentId);
+    }
+
+    return {
+      submissionId,
+      groupId: submission.groupId,
+      groupScore,
+      members: memberRows,
+    };
+  }
+}
+
+function clampPersonalScore(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  const clamped = Math.max(0, Math.min(10, value));
+  return Math.round(clamped * 100) / 100;
 }
 
 export const gradeService = new GradeService();
