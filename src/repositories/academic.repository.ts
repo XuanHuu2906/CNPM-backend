@@ -57,8 +57,16 @@ export class AcademicRepository {
   // CLASS (LỚP HỌC PHẦN)
   // ==========================================
 
-  async createClass(data: { classCode: string; subjectId: string; termId: string }): Promise<Class> {
+  async createClass(data: { classCode: string; subjectId: string; termId: string; assignmentType?: string }): Promise<Class> {
     return await prisma.class.create({ data });
+  }
+
+  async updateClassAssignmentType(id: string, assignmentType: string): Promise<Class> {
+    return await prisma.class.update({ where: { id }, data: { assignmentType } });
+  }
+
+  async countGroupsByClass(classId: string): Promise<number> {
+    return await prisma.group.count({ where: { classId } });
   }
 
   async findClassById(id: string) {

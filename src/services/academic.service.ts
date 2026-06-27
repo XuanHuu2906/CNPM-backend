@@ -7,6 +7,13 @@ import { AcademicTerm, Subject, Assignment } from '@prisma/client';
 import { SecurityHelper } from '../utils/securityHelper';
 import { emailService } from './email.service';
 import { logger } from '../utils/logger';
+import { AssignmentType } from '../config/prisma';
+
+function normalizeAssignmentType(raw: unknown): string {
+  if (typeof raw !== 'string') return AssignmentType.NHOM;
+  const v = raw.trim().toUpperCase();
+  return v === AssignmentType.CA_NHAN ? AssignmentType.CA_NHAN : AssignmentType.NHOM;
+}
 
 export class AcademicService {
   // ==========================================
@@ -77,6 +84,22 @@ export class AcademicService {
       throw new NotFoundError("Không tìm thấy thông tin lớp học phần yêu cầu");
     }
     return clazz;
+  }
+
+  async setClassAssignmentType(id: string, value: string) {
+    const normalized = normalizeAssignmentType(value);
+    const clazz = await academicRepository.findClassById(id);
+    if (!clazz) {
+      throw new NotFoundError("Không tìm thấy lớp học phần");
+    }
+    if (clazz.assignmentType === normalized) {
+      return clazz;
+    }
+    const groupCount = await academicRepository.countGroupsByClass(id);
+    if (groupCount > 0) {
+      throw new BadRequestError("Lớp đã có nhóm hoặc đề tài, không thể đổi loại phân công");
+    }
+    return await academicRepository.updateClassAssignmentType(id, normalized);
   }
 
   // ==========================================
@@ -324,7 +347,7 @@ export class AcademicService {
     const results = [];
     for (const classData of classes) {
       try {
-        const { classCode, subjectCode, subjectName, termName, teacherCode } = classData;
+        const { classCode, subjectCode, subjectName, termName, teacherCode, assignmentType: rawAssignmentType } = classData;
 
         if (!classCode) {
           throw new Error("Mã lớp học phần không được để trống!");
@@ -338,6 +361,8 @@ export class AcademicService {
         if (!teacherCode) {
           throw new Error("Mã giảng viên phụ trách không được để trống!");
         }
+
+        const assignmentType = normalizeAssignmentType(rawAssignmentType);
 
         // 1. Tìm hoặc tạo môn học
         let subject = await academicRepository.findSubjectByCode(subjectCode);
@@ -365,6 +390,7 @@ export class AcademicService {
             classCode,
             subjectId: subject.id,
             termId: term.id,
+            assignmentType,
           });
         }
 

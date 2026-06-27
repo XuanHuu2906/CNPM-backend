@@ -136,10 +136,11 @@ model Subject {
 
 // ---------- Class (LopHoc) ----------
 model Class {
-  id        String @id @default(cuid()) @map("LopHocID")
-  classCode String @unique @map("MaLop")
-  subjectId String @map("MonHocID")
-  termId    String @map("KyHocID")
+  id             String @id @default(cuid()) @map("LopHocID")
+  classCode      String @unique @map("MaLop")
+  subjectId      String @map("MonHocID")
+  termId         String @map("KyHocID")
+  assignmentType String @default("NHOM") @map("LoaiPhanCong")
 
   subject Subject      @relation(fields: [subjectId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   term    AcademicTerm @relation(fields: [termId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -502,8 +503,7 @@ enum GradingReopenRequestStatus {
 }
 
 // ==========================================
-// SUPPORTING MODELS (For DB compat / future use)
-// These exist in the DB design doc but aren't directly used by current code
+// SUPPORTING MODELS
 // ==========================================
 
 // ---------- Faculty (Khoa) ----------
@@ -518,38 +518,6 @@ model Faculty {
   subjects Subject[]
 
   @@map("Khoa")
-}
-
-// ---------- Role (VaiTro) ----------
-model Role {
-  id          String @id @default(cuid()) @map("VaiTroID")
-  code        String @unique @map("MaVaiTro")
-  name        String @map("TenVaiTro")
-  description String? @map("MoTa")
-
-  @@map("VaiTro")
-}
-
-// ---------- ReportStatus (TrangThaiBaoCao) ----------
-model ReportStatus {
-  id       String @id @map("MaTrangThai")
-  name     String @map("TenTrangThai")
-  description String? @map("MoTa")
-  displayOrder Int @map("ThuTuHienThi")
-
-  @@map("TrangThaiBaoCao")
-}
-
-// ---------- Topic (DeTai) ----------
-model Topic {
-  id        String   @id @default(cuid()) @map("DeTaiID")
-  name      String   @map("TenDeTai")
-  description String? @map("MoTa")
-  groupId   String?  @map("NhomID")
-  studentId String?  @map("SinhVienID")
-  createdAt DateTime @default(now()) @map("NgayTao")
-
-  @@map("DeTai")
 }
 
 // ---------- GroupMember (ThanhVienNhom) ----------
@@ -595,46 +563,3 @@ model AssignmentHistory {
   @@map("LichSuPhanCong")
 }
 
-// ---------- ReportFile (FileBaoCao) ----------
-model ReportFile {
-  id           String   @id @default(cuid()) @map("FileID")
-  submissionId String   @map("BaoCaoID")
-  version      Int      @map("LanNop")
-  fileType     String   @map("LoaiFile")
-  fileName     String   @map("TenFile")
-  fileFormat   String   @map("DinhDangFile")
-  fileSize     BigInt   @map("DungLuongByte")
-  storagePath  String   @map("DuongDanLuuTru")
-  fileHash     String?  @map("HashFile")
-  uploadedAt   DateTime @default(now()) @map("NgayNop")
-  uploadedBy   String   @map("NguoiNop")
-  isCurrent    Boolean  @default(true) @map("IsHienTai")
-
-  @@map("FileBaoCao")
-}
-
-// ---------- SubmissionHistory (LichSuNop) ----------
-model SubmissionHistory {
-  id           String   @id @default(cuid()) @map("LichSuNopID")
-  submissionId String   @map("BaoCaoID")
-  version      Int      @map("LanNop")
-  submittedAt  DateTime @map("NgayNop")
-  fileCount    Int      @default(0) @map("SoFileDaKem")
-  note         String?  @map("GhiChu")
-  submittedBy  String   @map("NguoiNop")
-
-  @@map("LichSuNop")
-}
-
-// ---------- DetailedScore (DiemTheoTieuChi) ----------
-model DetailedScore {
-  id        String   @id @default(cuid()) @map("DiemTieuChiID")
-  gradeId   String   @map("ChamDiemID")
-  criteriaId String  @map("TieuChiID")
-  score     Decimal  @map("DiemNhap") @db.Decimal(5, 2)
-  comment   String?  @map("NhanXet")
-  createdAt DateTime @default(now()) @map("NgayNhap")
-
-  @@unique([gradeId, criteriaId])
-  @@map("DiemTheoTieuChi")
-}

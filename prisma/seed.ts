@@ -25,8 +25,11 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting rich database seeding...');
 
-  // 1. Clean up old data in FK-safe order (children before parents)
-  await prisma.detailedScore.deleteMany().catch(() => {});
+  // 1. Clean up old data in FK-safe order (children before parents).
+  // gradingReopenRequest phải xóa trước submission/teacher/user vì FK của nó không Cascade
+  // (xem schema), nếu còn data sẽ block các deleteMany kế tiếp.
+  await prisma.gradingReopenRequest.deleteMany().catch(() => {});
+  await prisma.gradeMemberAdjustment.deleteMany().catch(() => {});
   await prisma.resubmissionRequest.deleteMany().catch(() => {});
   await prisma.comment.deleteMany().catch(() => {});
   await prisma.approval.deleteMany().catch(() => {});
@@ -39,8 +42,8 @@ async function main() {
   await prisma.assignment.deleteMany().catch(() => {});
   await prisma.assignmentHistory.deleteMany().catch(() => {});
   await prisma.classEnrollment.deleteMany().catch(() => {});
-  await prisma.student.deleteMany().catch(() => {});
   await prisma.groupMember.deleteMany().catch(() => {});
+  await prisma.student.deleteMany().catch(() => {});
   await prisma.group.deleteMany().catch(() => {});
   await prisma.class.deleteMany().catch(() => {});
   await prisma.academicTerm.deleteMany().catch(() => {});
@@ -50,16 +53,12 @@ async function main() {
   await prisma.admin.deleteMany().catch(() => {});
   await prisma.systemLog.deleteMany().catch(() => {});
   await prisma.systemConfig.deleteMany().catch(() => {});
+  await prisma.emailLog.deleteMany().catch(() => {});
   await prisma.notification.deleteMany().catch(() => {});
   await prisma.passwordResetToken.deleteMany().catch(() => {});
   await prisma.backup.deleteMany().catch(() => {});
   await prisma.user.deleteMany().catch(() => {});
   await prisma.faculty.deleteMany().catch(() => {});
-  await prisma.role.deleteMany().catch(() => {});
-  await prisma.reportStatus.deleteMany().catch(() => {});
-  await prisma.topic.deleteMany().catch(() => {});
-  await prisma.reportFile.deleteMany().catch(() => {});
-  await prisma.submissionHistory.deleteMany().catch(() => {});
 
   console.log('🧹 Cleaned up old database tables safely.');
 

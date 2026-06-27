@@ -5,6 +5,7 @@ import { academicRepository } from '../repositories/academic.repository';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../utils/apiResponse';
 import { SecurityHelper } from '../utils/securityHelper';
 import { SubmissionStatus, UserRole } from '@prisma/client';
+import { AssignmentType } from '../config/prisma';
 
 const isRedFont = (argb?: string) => {
   if (!argb) return false;
@@ -142,6 +143,7 @@ export class TeacherService {
     return assignments.map(a => ({
       id: a.class.id,
       classCode: a.class.classCode,
+      assignmentType: a.class.assignmentType,
       subject: a.class.subject,
       term: a.class.term,
       studentCount: a.class._count.enrollments,
@@ -207,6 +209,11 @@ export class TeacherService {
   async createGroup(classId: string, teacherId: string, data: { name: string; topicName?: string; studentIds: string[] }) {
     await this.verifyOwnership(classId, teacherId);
     await academicService.verifyTermActive(classId);
+
+    const clazz = await prisma.class.findUnique({ where: { id: classId }, select: { assignmentType: true } });
+    if (clazz?.assignmentType === AssignmentType.CA_NHAN) {
+      throw new BadRequestError("Lớp đang ở loại 'Cá nhân' — vui lòng dùng chức năng gán đề tài cho từng sinh viên");
+    }
 
     // Validate students enrolled & not in another group in same class
     if (data.studentIds.length > 0) {
@@ -362,11 +369,72 @@ export class TeacherService {
   }
 
   /**
+   * UC mở rộng: lớp loại CA_NHAN — GV gán trực tiếp 1 đề tài cho 1 SV.
+   * Tự tạo Group size=1 (SV là leader) để pipeline submission/grading dùng chung.
+   */
+  async assignTopicToStudent(
+    classId: string,
+    teacherId: string,
+    data: { studentId: string; topicName: string; description?: string },
+  ) {
+    await this.verifyOwnership(classId, teacherId);
+    await academicService.verifyTermActive(classId);
+
+    const clazz = await prisma.class.findUnique({ where: { id: classId } });
+    if (!clazz) throw new NotFoundError("Không tìm thấy lớp học phần");
+    if (clazz.assignmentType !== AssignmentType.CA_NHAN) {
+      throw new BadRequestError("Lớp không ở loại 'Cá nhân' — không thể dùng chức năng này");
+    }
+
+    const topicName = (data.topicName ?? '').trim();
+    if (!topicName) throw new BadRequestError("Tên đề tài không được để trống");
+
+    const student = await prisma.student.findUnique({
+      where: { id: data.studentId },
+      include: {
+        user: true,
+        enrollments: true,
+        groupMemberships: { include: { group: true } },
+      },
+    });
+    if (!student) throw new NotFoundError("Không tìm thấy sinh viên");
+    if (!student.enrollments.some(e => e.classId === classId)) {
+      throw new BadRequestError(`Sinh viên '${student.user.fullName}' không đăng ký lớp này`);
+    }
+    if (student.groupMemberships.some(gm => gm.group.classId === classId)) {
+      throw new BadRequestError(`Sinh viên '${student.user.fullName}' đã được gán đề tài trong lớp này`);
+    }
+
+    return await prisma.$transaction(async (tx) => {
+      const group = await tx.group.create({
+        data: {
+          name: student.studentCode ?? student.user.fullName ?? 'Cá nhân',
+          topicName,
+          classId,
+        },
+      });
+      await tx.groupMember.create({
+        data: {
+          groupId: group.id,
+          studentId: student.id,
+          isLeader: true,
+        },
+      });
+      return group;
+    });
+  }
+
+  /**
    * Tự động chia nhóm
    */
   async autoGenerateGroups(classId: string, teacherId: string, targetSize: number) {
     await this.verifyOwnership(classId, teacherId);
     await academicService.verifyTermActive(classId);
+
+    const clazz = await prisma.class.findUnique({ where: { id: classId }, select: { assignmentType: true } });
+    if (clazz?.assignmentType === AssignmentType.CA_NHAN) {
+      throw new BadRequestError("Lớp đang ở loại 'Cá nhân' — không hỗ trợ tự động chia nhóm");
+    }
 
     // Lấy SV chưa có nhóm trong LHP
     const enrollments = await academicRepository.getStudentsByClassId(classId);

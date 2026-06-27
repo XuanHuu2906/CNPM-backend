@@ -22,8 +22,15 @@ export const SubmissionStatus = {
   HOAN_THANH: 'HOAN_THANH'
 } as const;
 
+export const AssignmentType = {
+  CA_NHAN: 'CA_NHAN',
+  NHOM: 'NHOM'
+} as const;
+export type AssignmentType = typeof AssignmentType[keyof typeof AssignmentType];
+
 prismaModule.UserRole = UserRole;
 prismaModule.SubmissionStatus = SubmissionStatus;
+prismaModule.AssignmentType = AssignmentType;
 
 // Prevent multiple instances of Prisma Client in development (during hot reloading)
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
