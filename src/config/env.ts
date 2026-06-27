@@ -12,6 +12,8 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   CLOUDINARY_URL: z.string({ required_error: "CLOUDINARY_URL là bắt buộc" }).url({ message: "CLOUDINARY_URL phải là một URL hợp lệ" }),
   RESEND_API_KEY: z.string({ required_error: "RESEND_API_KEY là bắt buộc" }).min(1, "RESEND_API_KEY không được để trống"),
+  EMAIL_FROM: z.string().default('CNPM <onboarding@resend.dev>'),
+  FRONTEND_URL: z.string().url().default('http://localhost:5173'),
   ALLOWED_ORIGINS: z.string().default('http://localhost:5173'),
 });
 
