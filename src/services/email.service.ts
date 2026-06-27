@@ -1,7 +1,6 @@
 import { Resend } from 'resend';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
-import { InternalServerError } from '../utils/apiResponse';
 import { prisma } from '../config/prisma';
 
 const resend = new Resend(env.RESEND_API_KEY);
@@ -42,12 +41,11 @@ export class EmailService {
         }
       });
 
-      // 3. Gọi Resend API (Tạm thời gửi hết về mail dev theo yêu cầu)
-      const overrideEmail = 'huukongu@gmail.com';
+      // 3. Gọi Resend API
       const { data, error } = await resend.emails.send({
-        from: 'CNPM <onboarding@resend.dev>',
-        to: [overrideEmail],
-        subject: `[TEST cho ${recipientStr}] ${subject}`,
+        from: env.EMAIL_FROM,
+        to: Array.isArray(to) ? to : [to],
+        subject,
         html,
       });
 
@@ -79,7 +77,7 @@ export class EmailService {
    * Gửi email đặt lại mật khẩu
    */
   async sendPasswordResetEmail(email: string, resetToken: string) {
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+    const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     const html = `
       <h2>Đặt lại mật khẩu</h2>
       <p>Bạn nhận được email này vì đã yêu cầu đặt lại mật khẩu cho tài khoản của mình.</p>
