@@ -91,6 +91,9 @@ router.post('/terms/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), aca
 // 12. Nhập lớp học phần hàng loạt
 router.post('/classes/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.createClassesBatch);
 
+// 12.1. Đổi loại phân công đề tài của lớp (CA_NHAN | NHOM)
+router.patch('/classes/:id/assignment-type', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.setClassAssignmentType);
+
 // 13. Nhập đăng ký lớp hàng loạt
 router.post('/enrollments/batch', authenticate, authorize(UserRole.ACADEMIC_DEPT), academicController.createEnrollmentsBatch);
 

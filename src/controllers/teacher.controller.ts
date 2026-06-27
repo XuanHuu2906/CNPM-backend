@@ -120,6 +120,23 @@ export class TeacherController {
     return ApiResponse.success(res, "Cập nhật đề tài thành công", data);
   }
 
+  async assignTopicToStudent(req: Request, res: Response) {
+    const teacherId = req.user!.actorId!;
+    const { classId } = req.params;
+    const { studentId, topicName, description } = req.body ?? {};
+    if (!studentId || typeof topicName !== 'string') {
+      throw new BadRequestError('Thiếu studentId hoặc topicName');
+    }
+    const data = await teacherService.assignTopicToStudent(classId, teacherId, { studentId, topicName, description });
+    await auditLog(
+      req.user?.id ?? null,
+      'GAN_DE_TAI_CA_NHAN',
+      `GV gán đề tài "${topicName}" cho SV ${studentId} (lớp ${classId})`,
+      req.ip,
+    );
+    return ApiResponse.created(res, 'Gán đề tài cá nhân thành công', data);
+  }
+
   async autoGenerateGroups(req: Request, res: Response) {
     const teacherId = req.user!.actorId!;
     const { id } = req.params;

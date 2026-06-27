@@ -58,6 +58,9 @@ router.delete('/groups/:id/members/:studentId', ...teacherAuth, teacherControlle
 // 10. Cập nhật đề tài nhóm
 router.patch('/groups/:id/topic', ...teacherAuth, teacherController.updateTopic);
 
+// 10.1 Gán đề tài cá nhân (chỉ cho lớp loại CA_NHAN)
+router.post('/class-sections/:classId/individual-assignments', ...teacherAuth, teacherController.assignTopicToStudent);
+
 // 10.5 UC-16: GV gửi duyệt cả lớp (DA_CHAM → CHO_DUYET hàng loạt).
 router.post('/class-sections/:id/submit-for-review', ...teacherAuth, teacherController.submitClassForReview);
 

@@ -156,6 +156,22 @@ export class AcademicController {
     return ApiResponse.success(res, "Thực thi nhập lớp học phần hàng loạt hoàn tất", results);
   }
 
+  async setClassAssignmentType(req: Request, res: Response) {
+    const { id } = req.params;
+    const { value } = req.body ?? {};
+    if (typeof value !== 'string') {
+      throw new BadRequestError('Giá trị loại phân công không hợp lệ');
+    }
+    const updated = await academicService.setClassAssignmentType(id, value);
+    await auditLog(
+      req.user?.id ?? null,
+      'UPDATE_LOAI_PHAN_CONG',
+      `Đổi loại phân công lớp ${updated.classCode} -> ${updated.assignmentType}`,
+      req.ip,
+    );
+    return ApiResponse.success(res, 'Cập nhật loại phân công thành công', updated);
+  }
+
   async importClassExcel(req: Request, res: Response) {
     const file = (req as any).file as Express.Multer.File | undefined;
     if (!file || !file.buffer) throw new BadRequestError('Vui lòng tải lên file Excel (.xlsx)');
