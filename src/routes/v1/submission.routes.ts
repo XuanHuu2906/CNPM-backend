@@ -30,6 +30,26 @@ const ALLOWED_UPLOAD_MIMES = new Set([
 // UC-I02: whitelist extension để chặn file đã bị "rename" né mime detection.
 const ALLOWED_UPLOAD_EXTS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx']);
 
+/**
+ * Sanitize tên file gốc thành Cloudinary public_id hợp lệ giữ được phần nhận diện.
+ * - Bỏ extension (Cloudinary tự append theo resource_type)
+ * - Bỏ dấu tiếng Việt (NFD + strip combining marks)
+ * - Chỉ giữ [A-Za-z0-9_-], các ký tự khác → '_'
+ * - Gộp các '_' liên tiếp, cắt ngắn ≤ 80, suffix timestamp + random để chống trùng
+ */
+function buildPublicIdFromOriginalName(originalName: string): string {
+  const dot = originalName.lastIndexOf('.');
+  const base = dot >= 0 ? originalName.substring(0, dot) : originalName;
+  const stripped = base
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  const safe = stripped.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const trimmed = (safe || 'file').slice(0, 80);
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${trimmed}-${suffix}`;
+}
+
 // API tải file thực tế lên Cloudinary và trả về URL bảo mật
 // B16: chỉ Sinh viên / Giảng viên được upload (loại Admin/PĐT để tránh spam Cloudinary quota).
 // B16: rate-limit 10 req / 5 phút / user để chặn lạm dụng quota Cloudinary và DoS.
@@ -62,9 +82,14 @@ router.post('/upload', authenticate, uploadRateLimiter, authorize(UserRole.STUDE
     const isPdf = req.file.mimetype === 'application/pdf';
     const resourceType = isImage ? 'image' : (isPdf ? 'image' : 'raw'); // Cloudinary hỗ trợ PDF dưới dạng image hoặc raw
 
+    // Truyền public_id derive từ tên file gốc → URL Cloudinary chứa tên đọc được
+    // (vd .../academic_reports/BaoCao_Nhom1-abc123.pdf) thay vì hash ngẫu nhiên Cloudinary tự sinh.
+    // Giải quyết bug: sau khi nộp & reload, frontend split URL ra public_id để hiển thị tên tệp.
+    const publicId = buildPublicIdFromOriginalName(originalName);
     const uploadResult = await uploadService.uploadFromBuffer(req.file.buffer, {
       folder: 'academic_reports',
       resourceType: resourceType,
+      publicId,
     });
 
     return res.status(200).json({

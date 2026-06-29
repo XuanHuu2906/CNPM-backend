@@ -574,6 +574,13 @@ export class TeacherService {
       workbook.worksheets[0];
     if (!sheet) throw new BadRequestError('File Excel không có sheet nào');
 
+    // Sheet "Điểm Thi" (nếu có) chứa cột H "Tên đề tài" là tiêu đề mô tả dài.
+    // Khớp theo row number với "Điểm Danh" — ưu tiên dùng cột H làm topicName, fallback cột G "Đề tài".
+    const examSheet =
+      workbook.getWorksheet('Điểm Thi') ||
+      workbook.getWorksheet('Diem Thi') ||
+      null;
+
     type ParsedMember = { studentCode: string; fullName: string; isLeader: boolean };
     type ParsedGroup = { groupNo: number; name: string; topicName: string; members: ParsedMember[] };
 
@@ -582,7 +589,10 @@ export class TeacherService {
     const seenCodes = new Set<string>();
 
     const HEADER_ROW = 7;
-    const lastRow = sheet.actualRowCount || sheet.rowCount;
+    // BUG FIX: `actualRowCount` của ExcelJS đếm SỐ dòng có dữ liệu, không phải INDEX dòng cuối.
+    // Nếu file có dòng trống ở giữa (vd row 3, row 6 chỉ chứa label-merge), actualRowCount < rowCount
+    // → loop sẽ bỏ qua các SV cuối file. Dùng max của 2 giá trị để chắc chắn lặp tới dòng cuối thực sự.
+    const lastRow = Math.max(sheet.actualRowCount || 0, sheet.rowCount || 0);
 
     for (let r = HEADER_ROW + 1; r <= lastRow; r++) {
       const row = sheet.getRow(r);
@@ -600,7 +610,12 @@ export class TeacherService {
 
       const nhomRaw = row.getCell(5).value;
       const tenNhomRaw = String(row.getCell(6).value ?? '').trim();
-      const deTaiRaw = String(row.getCell(7).value ?? '').trim();
+      const deTaiCategory = String(row.getCell(7).value ?? '').trim();
+      // Ưu tiên "Tên đề tài" (cột H sheet "Điểm Thi") làm topicName; fallback "Đề tài" (cột G sheet "Điểm Danh").
+      const tenDeTaiLong = examSheet
+        ? String(examSheet.getRow(r).getCell(8).value ?? '').trim()
+        : '';
+      const deTaiRaw = tenDeTaiLong || deTaiCategory;
 
       if (nhomRaw !== null && nhomRaw !== undefined && nhomRaw !== '') {
         const n = Number(nhomRaw);
@@ -693,6 +708,8 @@ export class TeacherService {
       let enrolledCount = 0;
 
       // Auto-create SV còn thiếu
+      // Lưu ý: dùng for-loop sequential vì cần include student và tránh race condition trên unique constraints.
+      // Vì vậy cần timeout đủ lớn cho file Excel hàng trăm SV (xem option ở cuối $transaction).
       for (const g of groupsByNo.values()) {
         for (const m of g.members) {
           if (studentByCode.has(m.studentCode)) continue;
@@ -768,6 +785,11 @@ export class TeacherService {
         enrolledCount,
         groups: createdGroups,
       };
+    }, {
+      // Default Prisma timeout = 5s. Với file Excel hàng trăm SV (mỗi user.create là 1 round-trip)
+      // dễ vượt 5s → transaction bị đóng giữa chừng (lỗi "Transaction not found").
+      maxWait: 15_000,   // chờ tối đa 15s để lấy được kết nối
+      timeout: 120_000,  // cho phép transaction chạy tới 2 phút
     });
   }
 }

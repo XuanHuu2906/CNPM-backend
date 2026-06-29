@@ -56,6 +56,44 @@ export class ResubmissionRequestService {
       }
     });
 
+    // Gửi notification cho GV phụ trách lớp (best-effort)
+    try {
+      // Xác định classId qua group (bài nhóm) hoặc enrollment (bài cá nhân)
+      let classId: string | null = submission.group?.classId ?? null;
+      if (!classId && submission.studentId) {
+        const enrollment = await prisma.classEnrollment.findFirst({
+          where: { studentId: submission.studentId },
+          orderBy: { createdAt: 'desc' },
+          select: { classId: true },
+        });
+        classId = enrollment?.classId ?? null;
+      }
+      if (classId) {
+        const studentInfo = await prisma.student.findUnique({
+          where: { id: studentId },
+          include: { user: { select: { fullName: true } } },
+        });
+        const studentName = studentInfo?.user?.fullName ?? 'Sinh viên';
+        const assignments = await prisma.assignment.findMany({
+          where: { classId },
+          include: { teacher: { select: { userId: true } } },
+        });
+        for (const a of assignments) {
+          const teacherUserId = a.teacher?.userId;
+          if (!teacherUserId) continue;
+          await notificationService.createNotification({
+            userId: teacherUserId,
+            title: 'Yêu cầu nộp lại từ sinh viên',
+            content: `${studentName} đã gửi yêu cầu nộp lại báo cáo. Lý do: ${reason}`,
+            type: 'YEU_CAU_SUA',
+            submissionId,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Không thể gửi thông báo cho giảng viên khi SV yêu cầu nộp lại:', err);
+    }
+
     return request;
   }
 

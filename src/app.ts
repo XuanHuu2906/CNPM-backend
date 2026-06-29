@@ -1,6 +1,10 @@
 // Apply @prisma/client monkey patches FIRST before any module imports the client
 import './config/prisma';
 
+// Phải import trước express để patch Router prototype, cho phép async controllers
+// throw lỗi và được forward tự động sang errorHandler thay vì crash process.
+import 'express-async-errors';
+
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { env } from './config/env';

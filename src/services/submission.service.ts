@@ -19,6 +19,7 @@ export class SubmissionService {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
+        user: { select: { fullName: true } },
         enrollments: true,
         groupMemberships: {
           include: {
@@ -84,6 +85,7 @@ export class SubmissionService {
         studentId
       );
       await studentNotificationService.notifySubmissionSuccess(result.id, true);
+      await this.notifyClassTeachersOnSubmit(data.classId, student.user?.fullName ?? 'Sinh viên', result.id, true);
       return result;
     } else {
       // Nếu chưa có bài nộp, tiến hành tạo mới
@@ -98,7 +100,35 @@ export class SubmissionService {
 
       const result = await submissionRepository.createSubmission(submissionData, studentId);
       await studentNotificationService.notifySubmissionSuccess(result.id, false);
+      await this.notifyClassTeachersOnSubmit(data.classId, student.user?.fullName ?? 'Sinh viên', result.id, false);
       return result;
+    }
+  }
+
+  /**
+   * Gửi notification cho TẤT CẢ GV phụ trách lớp khi SV nộp / nộp lại báo cáo.
+   * Best-effort: lỗi gửi không làm fail nghiệp vụ nộp bài.
+   */
+  private async notifyClassTeachersOnSubmit(classId: string, studentName: string, submissionId: string, isResubmit: boolean) {
+    try {
+      const assignments = await prisma.assignment.findMany({
+        where: { classId },
+        include: { teacher: { select: { userId: true } } },
+      });
+      const verb = isResubmit ? 'nộp lại' : 'nộp';
+      for (const a of assignments) {
+        const teacherUserId = a.teacher?.userId;
+        if (!teacherUserId) continue;
+        await notificationService.createNotification({
+          userId: teacherUserId,
+          title: `Sinh viên ${verb} báo cáo mới`,
+          content: `${studentName} đã ${verb} báo cáo. Vui lòng vào hàng đợi chấm điểm để xem.`,
+          type: 'TRANG_THAI',
+          submissionId,
+        });
+      }
+    } catch (err) {
+      console.error('Không thể gửi thông báo cho giảng viên khi SV nộp bài:', err);
     }
   }
 
