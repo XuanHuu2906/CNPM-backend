@@ -69,6 +69,17 @@ export class GradeService {
       throw new BadRequestError("Báo cáo môn học này đang ở trạng thái chưa nộp bài. Không thể tiến hành chấm điểm!");
     }
 
+    // Khi bài đang ở YEU_CAU_SUA: GV đã yêu cầu SV sửa, đang chờ SV nộp lại → không cho chấm
+    // (sẽ chấm bản cũ và ghi đè grade khi SV nộp bản mới → loạn).
+    if (submission.status === SubmissionStatus.YEU_CAU_SUA) {
+      throw new BadRequestError("Bài đang ở trạng thái Yêu cầu sửa — chờ sinh viên nộp lại trước khi chấm điểm.");
+    }
+
+    // Bài bị từ chối: không có ý nghĩa chấm tiếp.
+    if (submission.status === SubmissionStatus.TU_CHOI) {
+      throw new BadRequestError("Bài nộp đã bị từ chối — không thể chấm điểm.");
+    }
+
     // 2. Chốt chặn học kỳ: Kiểm tra học kỳ chứa lớp học phần này đã bị khóa điểm hay chưa
     await academicService.verifyTermActive(classId);
 
