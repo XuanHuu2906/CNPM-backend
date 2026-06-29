@@ -184,9 +184,9 @@ export class SubmissionService {
       await verifyTeacherClassOwnership(classId, actorId);
     }
 
-    // Chặn giảng viên tự ý chuyển từ DA_CHAM/CHO_DUYET về DANG_CHAM
+    // Chặn giảng viên tự ý chuyển từ DA_CHAM (terminal) về DANG_CHAM
     if (data.status === SubmissionStatus.DANG_CHAM) {
-      if (submission.status === SubmissionStatus.DA_CHAM || submission.status === SubmissionStatus.CHO_DUYET) {
+      if (submission.status === SubmissionStatus.DA_CHAM) {
         throw new BadRequestError("Không được phép tự ý chuyển trạng thái báo cáo về Đang chấm. Vui lòng gửi yêu cầu mở lại chấm điểm.");
       }
     }
@@ -219,7 +219,7 @@ export class SubmissionService {
       await studentNotificationService.notifyRevisionRequested(id, reqUserFullName, data.editRequestNote || 'Vui lòng kiểm tra lại báo cáo.');
     } else if (data.status === SubmissionStatus.TU_CHOI) {
       await studentNotificationService.notifySubmissionRejected(id, data.rejectReason || 'Báo cáo không đạt yêu cầu.');
-    } else if (data.status === SubmissionStatus.HOAN_THANH) {
+    } else if (data.status === SubmissionStatus.DA_CHAM) {
       await studentNotificationService.notifyResultPublished(id);
     } else {
       for (const uid of userIds) {

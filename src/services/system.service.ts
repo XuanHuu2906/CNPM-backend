@@ -1,9 +1,6 @@
 import { systemRepository } from '../repositories/system.repository';
-import { gradeRepository } from '../repositories/grade.repository';
-import { submissionRepository } from '../repositories/submission.repository';
-import { academicService } from './academic.service';
 import { BadRequestError, NotFoundError } from '../utils/apiResponse';
-import { Grade, SystemConfig, SystemLog } from '@prisma/client';
+import { SystemConfig, SystemLog } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import fs from 'fs';
 import path from 'path';
@@ -90,318 +87,27 @@ export class SystemService {
   }
 
   // ==========================================
-  // UC-16 (BATCH): PHÊ DUYỆT / TRẢ VỀ NHIỀU BÀI MỘT LẦN
+  // (DEPRECATED) Workflow phê duyệt PĐT đã bị bỏ — refactor 2026-06-29
   // ==========================================
-  // Mỗi item chạy trong transaction riêng:
-  //  - APPROVE: Grade.isApproved=true + submission.status=HOAN_THANH (OCC).
-  //  - RETURN : Grade.isApproved=false + submission.status=DANG_CHAM (OCC), reason bắt buộc.
-  // Item lỗi không làm hỏng phần còn lại — trả về kết quả per-item.
-  async batchApproveGrades(params: {
+  /** @deprecated - workflow PĐT duyệt đã bỏ. Stub này throw để client phát hiện. */
+  async batchApproveGrades(_params: {
     submissionIds: string[];
     action: 'APPROVE' | 'RETURN';
     reason?: string;
     actorId: string;
-  }) {
-    const { submissionIds, action, reason, actorId } = params;
-
-    if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
-      throw new BadRequestError('Danh sách bài cần phê duyệt rỗng');
-    }
-    if (submissionIds.length > 100) {
-      throw new BadRequestError('Mỗi lần xử lý tối đa 100 bài để tránh quá tải');
-    }
-    if (action !== 'APPROVE' && action !== 'RETURN') {
-      throw new BadRequestError('Hành động không hợp lệ');
-    }
-    if (action === 'RETURN' && (!reason || !reason.trim())) {
-      throw new BadRequestError('Vui lòng nhập lý do trả về');
-    }
-
-    const uniqueIds = [...new Set(submissionIds)];
-    const results: Array<
-      | { submissionId: string; status: 'SUCCESS' }
-      | { submissionId: string; status: 'FAILED'; reason: string }
-    > = [];
-
-    for (const submissionId of uniqueIds) {
-      try {
-        const submission = await prisma.submission.findUnique({
-          where: { id: submissionId },
-          include: {
-            grades: true,
-            student: { include: { enrollments: { take: 1, orderBy: { createdAt: 'desc' } } } },
-            group: { select: { classId: true } },
-          },
-        });
-        if (!submission) {
-          throw new Error('Không tìm thấy bài nộp');
-        }
-        if (submission.status !== 'CHO_DUYET') {
-          throw new Error(`Bài nộp đang ở trạng thái ${submission.status}, không phải CHO_DUYET`);
-        }
-        const grade = submission.grades[0];
-        if (!grade) {
-          throw new Error('Chưa có điểm chấm');
-        }
-
-        const classId = submission.group?.classId
-          ?? submission.student?.enrollments[0]?.classId
-          ?? null;
-        if (classId) {
-          await academicService.verifyTermActive(classId);
-        }
-
-        const targetStatus = action === 'APPROVE' ? 'HOAN_THANH' : 'DANG_CHAM';
-
-        await prisma.$transaction(async (tx) => {
-          // 1. Grade OCC
-          const updGrade = await tx.grade.updateMany({
-            where: { submissionId, version: grade.version },
-            data: {
-              isApproved: action === 'APPROVE',
-              approvedById: action === 'APPROVE' ? actorId : null,
-              version: { increment: 1 },
-            },
-          });
-          if (updGrade.count === 0) {
-            throw new Error('Bảng điểm đã bị thay đổi (OCC), vui lòng tải lại');
-          }
-
-          // 2. Submission OCC
-          const updSub = await tx.submission.updateMany({
-            where: { id: submissionId, version: submission.version, status: 'CHO_DUYET' },
-            data: {
-              status: targetStatus,
-              rejectReason: action === 'RETURN' ? (reason ?? null) : null,
-              version: { increment: 1 },
-            },
-          });
-          if (updSub.count === 0) {
-            throw new Error('Trạng thái bài nộp đã bị thay đổi (OCC)');
-          }
-
-          // 3. Log
-          await tx.submissionLog.create({
-            data: {
-              submissionId,
-              oldStatus: 'CHO_DUYET',
-              newStatus: targetStatus,
-              actorId,
-              note: action === 'APPROVE'
-                ? 'PĐT phê duyệt (batch UC-16)'
-                : `PĐT trả về chấm lại (batch UC-16): ${reason ?? ''}`,
-            },
-          });
-        });
-
-        // Notify (best-effort)
-        try {
-          const userIds: string[] = [];
-          if (submission.student) {
-            const stu = await prisma.student.findUnique({
-              where: { id: submission.studentId! },
-              select: { userId: true },
-            });
-            if (stu?.userId) userIds.push(stu.userId);
-          }
-          if (submission.group?.classId) {
-            const members = await prisma.groupMember.findMany({
-              where: { groupId: submission.groupId! },
-              include: { student: { select: { userId: true } } },
-            });
-            members.forEach(m => { if (m.student.userId) userIds.push(m.student.userId); });
-          }
-          for (const uid of [...new Set(userIds)]) {
-            await prisma.notification.create({
-              data: {
-                userId: uid,
-                title: action === 'APPROVE' ? 'Kết quả đã được phê duyệt' : 'Bài nộp bị trả về chấm lại',
-                content: action === 'APPROVE'
-                  ? 'Phòng Đào tạo đã phê duyệt kết quả chấm điểm. Bạn có thể xem điểm chính thức.'
-                  : `Phòng Đào tạo trả về bài nộp để chấm lại. Lý do: ${reason ?? ''}`,
-                type: 'TRANG_THAI',
-                submissionId,
-              },
-            });
-          }
-        } catch {
-          // best-effort
-        }
-
-        results.push({ submissionId, status: 'SUCCESS' });
-      } catch (err: any) {
-        results.push({ submissionId, status: 'FAILED', reason: err.message || 'Lỗi không xác định' });
-      }
-    }
-
-    const successCount = results.filter(r => r.status === 'SUCCESS').length;
-    const failedCount = results.length - successCount;
-
-    await this.logAction(
-      actorId,
-      'PHE_DUYET_DIEM_LO',
-      `Duyệt theo lô (${action}): tổng ${uniqueIds.length}, OK ${successCount}, lỗi ${failedCount}${reason ? `, lý do: ${reason}` : ''}`,
-    );
-
-    return {
-      action,
-      totalRequested: uniqueIds.length,
-      successCount,
-      failedCount,
-      results,
-    };
+  }): Promise<never> {
+    throw new BadRequestError('Tính năng phê duyệt đã được bỏ — GV chấm xong là điểm chính thức.');
   }
 
-  // ==========================================
-  // PHÊ DUYỆT ĐIỂM (GRADE APPROVALS - UC-16)
-  // ==========================================
-
-  /**
-   * PDT phê duyệt hoặc gỡ phê duyệt bảng điểm của bài báo cáo (OCC).
-   * Khi trả về (isApproved=false), đồng bộ Submission.status → DANG_CHAM,
-   * lưu rejectReason và ghi SubmissionLog để GV biết lý do.
-   */
+  /** @deprecated - workflow PĐT duyệt đã bỏ. */
   async approveGrade(
-    submissionId: string,
-    isApproved: boolean,
-    version: number,
-    approvedById: string,
-    reason?: string
-  ): Promise<Grade> {
-    // 1. Kiểm tra tồn tại điểm số
-    const grade = await gradeRepository.findGradeBySubmissionId(submissionId);
-    if (!grade) {
-      throw new NotFoundError("Báo cáo môn học chưa được giảng viên nhập điểm. Không thể phê duyệt!");
-    }
-
-    // 2. Lấy submission để kiểm tra học kỳ + phục vụ đồng bộ status
-    const submission = await submissionRepository.findSubmissionById(submissionId);
-    if (!submission) {
-      throw new NotFoundError("Không tìm thấy bài nộp tương ứng.");
-    }
-
-    // 2b. Chỉ cho phép phê duyệt khi GV đã chính thức gửi (status=CHO_DUYET).
-    // Khi GV mới "Lưu nháp" (isDraft=true), submission vẫn ở DA_NOP/DA_CHAM → PĐT không được duyệt
-    // (tránh duyệt khống bản nháp). Khi gỡ duyệt (isApproved=false) thì cho phép từ HOAN_THANH/CHO_DUYET.
-    if (isApproved) {
-      if (submission.status !== 'CHO_DUYET') {
-        throw new BadRequestError(
-          `Chỉ được phê duyệt bài đang ở trạng thái Chờ duyệt (hiện tại: ${submission.status}). Giảng viên cần "Chấp nhận và gửi" trước.`,
-        );
-      }
-    } else {
-      // Gỡ duyệt: chỉ áp dụng cho bài đã / đang xét duyệt.
-      if (submission.status !== 'HOAN_THANH' && submission.status !== 'CHO_DUYET') {
-        throw new BadRequestError(
-          `Chỉ được trả về bài đang ở trạng thái Chờ duyệt hoặc Hoàn thành (hiện tại: ${submission.status}).`,
-        );
-      }
-    }
-    let classId = submission.group?.classId;
-    if (!classId && submission.student) {
-      const student = submission.student as any;
-      if (student.enrollments && student.enrollments.length > 0) {
-        classId = student.enrollments[0]?.classId;
-      }
-    }
-    if (classId) {
-      await academicService.verifyTermActive(classId);
-    }
-
-    // 3. Thực thi phê duyệt điểm + đồng bộ trạng thái bài nộp trong cùng transaction.
-    const targetStatus = isApproved ? 'HOAN_THANH' : 'DANG_CHAM';
-    const oldStatus = submission.status;
-
-    const updatedGrade = await prisma.$transaction(async (tx) => {
-      // 3a. Grade OCC
-      const updGrade = await tx.grade.updateMany({
-        where: { submissionId, version },
-        data: {
-          isApproved,
-          approvedById: isApproved ? approvedById : null,
-          version: { increment: 1 },
-        },
-      });
-      if (updGrade.count === 0) {
-        throw new BadRequestError("Bảng điểm đã bị thay đổi bởi một tiến trình khác trước đó. Vui lòng tải lại trang.");
-      }
-
-      // 3b. Submission status — chỉ đổi khi cần (CHO_DUYET → HOAN_THANH/DANG_CHAM).
-      // Bỏ qua nếu submission đã ở target status (vd: gỡ phê duyệt từ HOAN_THANH).
-      if (submission.status !== targetStatus) {
-        const updSub = await tx.submission.updateMany({
-          where: { id: submissionId, version: (submission as any).version },
-          data: {
-            status: targetStatus,
-            rejectReason: !isApproved ? (reason ?? null) : null,
-            version: { increment: 1 },
-          },
-        });
-        if (updSub.count === 0) {
-          throw new BadRequestError("Trạng thái bài nộp đã bị thay đổi bởi tiến trình khác. Vui lòng tải lại trang.");
-        }
-
-        // 3c. Ghi nhật ký trạng thái
-        await tx.submissionLog.create({
-          data: {
-            submissionId,
-            oldStatus,
-            newStatus: targetStatus,
-            actorId: approvedById,
-            note: isApproved
-              ? 'PĐT phê duyệt kết quả'
-              : `PĐT trả về chấm lại: ${reason ?? ''}`,
-          },
-        });
-      }
-
-      const updated = await tx.grade.findUniqueOrThrow({ where: { submissionId } });
-      return updated;
-    });
-
-    // 4. Notify (best-effort)
-    try {
-      const userIds: string[] = [];
-      if (submission.student) {
-        const stu = await prisma.student.findUnique({
-          where: { id: submission.studentId! },
-          select: { userId: true },
-        });
-        if (stu?.userId) userIds.push(stu.userId);
-      }
-      if (submission.group?.classId) {
-        const members = await prisma.groupMember.findMany({
-          where: { groupId: submission.groupId! },
-          include: { student: { select: { userId: true } } },
-        });
-        members.forEach(m => { if (m.student.userId) userIds.push(m.student.userId); });
-      }
-      for (const uid of [...new Set(userIds)]) {
-        await prisma.notification.create({
-          data: {
-            userId: uid,
-            title: isApproved ? 'Kết quả đã được phê duyệt' : 'Bài nộp bị trả về chấm lại',
-            content: isApproved
-              ? 'Phòng Đào tạo đã phê duyệt kết quả chấm điểm. Bạn có thể xem điểm chính thức.'
-              : `Phòng Đào tạo trả về bài nộp để chấm lại. Lý do: ${reason ?? ''}`,
-            type: 'TRANG_THAI',
-            submissionId,
-          },
-        });
-      }
-    } catch {
-      // best-effort, không chặn flow nếu notification fail
-    }
-
-    // 5. Lưu vết hoạt động hệ thống
-    const actionName = isApproved ? "PHÊ_DUYỆT_ĐIỂM" : "TRẢ_VỀ_CHẤM_LẠI";
-    const actionDesc = isApproved
-      ? `Phê duyệt chính thức điểm số bài báo cáo [ID: ${submissionId}] với điểm tổng kết [${grade.finalScore}]`
-      : `Trả về chấm lại bài báo cáo [ID: ${submissionId}]${reason ? ` — lý do: ${reason}` : ''}`;
-
-    await this.logAction(approvedById, actionName, actionDesc);
-
-    return updatedGrade as Grade;
+    _submissionId: string,
+    _isApproved: boolean,
+    _version: number,
+    _approvedById: string,
+    _reason?: string
+  ): Promise<never> {
+    throw new BadRequestError('Tính năng phê duyệt đã được bỏ — GV chấm xong là điểm chính thức.');
   }
 
   // ==========================================
@@ -681,7 +387,7 @@ export class SystemService {
     });
 
     const totalReports = submissions.length;
-    const approvedReports = submissions.filter(s => s.status === 'HOAN_THANH').length;
+    const approvedReports = submissions.filter(s => s.status === 'DA_CHAM').length;
     const pendingReports = submissions.filter(s => ['DA_NOP', 'DANG_CHAM'].includes(s.status)).length;
     const rejectedReports = submissions.filter(s => ['YEU_CAU_SUA', 'TU_CHOI'].includes(s.status)).length;
 

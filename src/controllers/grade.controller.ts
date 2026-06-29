@@ -63,7 +63,7 @@ export class GradeController {
   }
 
   // UC-09 / UC-I05: Đọc bảng điểm kèm điểm cá nhân từng thành viên (group score × factor).
-  // SV: chỉ trả record của chính mình + chỉ khi submission đã HOAN_THANH (giống R5/R6).
+  // SV: chỉ trả record của chính mình + chỉ khi submission đã DA_CHAM (terminal).
   async getGradeWithMemberScores(req: Request, res: Response, next: NextFunction) {
     try {
       const { submissionId } = req.params;
@@ -74,8 +74,8 @@ export class GradeController {
         if (!submission) {
           throw new BadRequestError('Không tìm thấy bài nộp');
         }
-        if (submission.status !== SubmissionStatus.HOAN_THANH) {
-          throw new ForbiddenError('Điểm chưa được Phòng Đào Tạo duyệt.');
+        if (submission.status !== SubmissionStatus.DA_CHAM) {
+          throw new ForbiddenError('Điểm chưa được công bố.');
         }
         // SV chỉ thấy điểm cá nhân của chính mình.
         restrictToStudentId = req.user?.actorId;
@@ -92,14 +92,14 @@ export class GradeController {
     try {
       const { submissionId } = req.params;
 
-      // Sinh viên chỉ được xem điểm khi Phòng Đào Tạo đã duyệt (status = HOAN_THANH)
+      // Sinh viên chỉ được xem điểm khi bài đã chấm xong (DA_CHAM = terminal)
       if (req.user?.role === UserRole.STUDENT) {
         const submission = await submissionRepository.findSubmissionById(submissionId);
         if (!submission) {
           throw new BadRequestError('Không tìm thấy bài nộp');
         }
-        if (submission.status !== SubmissionStatus.HOAN_THANH) {
-          throw new ForbiddenError('Điểm chưa được Phòng Đào Tạo duyệt. Vui lòng quay lại sau khi có kết quả chính thức.');
+        if (submission.status !== SubmissionStatus.DA_CHAM) {
+          throw new ForbiddenError('Điểm chưa được công bố. Vui lòng quay lại sau khi giảng viên chấm xong.');
         }
       }
 

@@ -6,43 +6,13 @@ import fs from 'fs';
 import path from 'path';
 
 export class SystemController {
-  // UC-16: Phê duyệt theo lô — PĐT chọn nhiều bài để phê duyệt hoặc trả về cùng lúc.
-  async batchApproveGrades(req: Request, res: Response) {
-    const { submissionIds, action, reason } = req.body || {};
-    // Dùng User.id (không phải actorId = AcademicDept.id) vì SystemLog.userId là FK đến NguoiDung.
-    const actorId = req.user?.id;
-    if (!actorId) {
-      throw new BadRequestError('Yêu cầu xác thực Phòng Đào Tạo / Admin');
-    }
-    const result = await systemService.batchApproveGrades({
-      submissionIds,
-      action,
-      reason,
-      actorId,
-    });
-    const message = action === 'APPROVE'
-      ? `Đã phê duyệt ${result.successCount}/${result.totalRequested} bài`
-      : `Đã trả về ${result.successCount}/${result.totalRequested} bài`;
-    return ApiResponse.success(res, message, result);
+  // @deprecated - workflow PĐT duyệt đã bỏ. Stub trả 410.
+  async batchApproveGrades(_req: Request, _res: Response) {
+    throw new BadRequestError('Tính năng phê duyệt theo lô đã được bỏ — GV chấm xong là điểm chính thức.');
   }
 
-  async approveGrade(req: Request, res: Response) {
-    const { submissionId } = req.params;
-    const { isApproved, version, reason } = req.body;
-    // Dùng User.id vì SystemLog.userId là FK đến NguoiDung (actorId là AcademicDept.id sẽ gây FK violation → 500).
-    const approvedById = req.user?.id;
-
-    if (!approvedById) {
-      throw new BadRequestError("Tác nhân thực hiện phê duyệt phải là Phòng Đào Tạo hoặc Admin");
-    }
-
-    const grade = await systemService.approveGrade(submissionId, isApproved, version, approvedById, reason);
-    
-    const message = isApproved 
-      ? "Phê duyệt chính thức bảng điểm báo cáo thành công" 
-      : "Hủy bỏ trạng thái phê duyệt bảng điểm thành công";
-
-    return ApiResponse.success(res, message, grade);
+  async approveGrade(_req: Request, _res: Response) {
+    throw new BadRequestError('Tính năng phê duyệt điểm đã được bỏ — GV chấm xong là điểm chính thức.');
   }
 
   async updateConfig(req: Request, res: Response) {
