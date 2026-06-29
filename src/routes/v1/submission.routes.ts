@@ -79,8 +79,10 @@ router.post('/upload', authenticate, uploadRateLimiter, authorize(UserRole.STUDE
 
     // Tự động phân loại định dạng tệp tin
     const isImage = req.file.mimetype.startsWith('image/');
-    const isPdf = req.file.mimetype === 'application/pdf';
-    const resourceType = isImage ? 'image' : (isPdf ? 'image' : 'raw'); // Cloudinary hỗ trợ PDF dưới dạng image hoặc raw
+    // PDF/DOC/DOCX dùng resource_type 'raw' để serve qua /raw/upload/.
+    // Nếu để 'image' thì Cloudinary chặn delivery PDF mặc định (setting "Allow delivery of PDF and ZIP files")
+    // → trình duyệt mở link sẽ báo "We can't open this file".
+    const resourceType = isImage ? 'image' : 'raw';
 
     // Truyền public_id derive từ tên file gốc → URL Cloudinary chứa tên đọc được
     // (vd .../academic_reports/BaoCao_Nhom1-abc123.pdf) thay vì hash ngẫu nhiên Cloudinary tự sinh.
