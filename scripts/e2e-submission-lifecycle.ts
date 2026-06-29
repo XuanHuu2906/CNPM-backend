@@ -447,12 +447,12 @@ async function main() {
   if (r.status === 200 || r.status === 201) ok(`GV chấm hợp lệ → grade.finalScore=${r.data?.data?.finalScore}`);
   else bad('GV chấm hợp lệ expected 2xx', { status: r.status, data: r.data });
 
-  // Verify submission.status = DA_CHAM
+  // Verify submission.status = CHO_DUYET
   let sub = await prisma.submission.findUnique({ where: { id: submissionId } });
-  if (sub?.status === 'DA_CHAM') ok('DB: submission.status = DA_CHAM sau khi GV chấm');
-  else bad(`DB: submission.status expected DA_CHAM, got ${sub?.status}`);
+  if (sub?.status === 'CHO_DUYET') ok('DB: submission.status = CHO_DUYET sau khi GV chấm');
+  else bad(`DB: submission.status expected CHO_DUYET, got ${sub?.status}`);
 
-  // Negative: GV chấm lại khi đã DA_CHAM → 403
+  // Negative: GV chấm lại khi đã CHO_DUYET → 403
   r = await teacher.post(`/grades/submission/${submissionId}`, {
     rubricId: f.rubric.id,
     detailedScores: [
@@ -462,7 +462,7 @@ async function main() {
     version: 2,
   });
   if (r.status === 403 && /mở lại chấm điểm/i.test(r.data?.message || '')) {
-    ok('GV chấm lại khi DA_CHAM → 403 (yêu cầu reopen)');
+    ok('GV chấm lại khi CHO_DUYET → 403 (yêu cầu reopen)');
   } else bad('GV chấm lại expected 403', { status: r.status, data: r.data });
 
   // ============================================================
@@ -606,10 +606,10 @@ async function main() {
     if (r.status === 200 || r.status === 201) ok(`GV chấm group2 → 2xx, finalScore=${r.data?.data?.finalScore}`);
     else bad('GV chấm group2 expected 2xx', { status: r.status, data: r.data });
 
-    // GV gửi duyệt
+    // GV gửi duyệt (đã tự động gửi khi chấm, nên movedCount = 0)
     r = await teacher.post(`/teacher/class-sections/${f.clazz.id}/submit-for-review`);
-    if (r.status === 200 && r.data?.data?.movedCount >= 1) ok(`Gửi duyệt lớp lần 2 → moved=${r.data.data.movedCount}`);
-    else bad('Gửi duyệt expected moved≥1', r.data);
+    if (r.status === 200 && r.data?.data?.movedCount === 0) ok(`Gửi duyệt lớp lần 2 → moved=${r.data.data.movedCount} (đã tự động gửi)`);
+    else bad('Gửi duyệt expected moved=0', r.data);
 
     // PĐT batch approve
     r = await pdt.post('/system/grades/batch-approve', {
@@ -727,7 +727,7 @@ async function main() {
       ],
       version: 1,
     });
-    if (r.status === 200 || r.status === 201) ok('GV chấm sub3 → DA_CHAM');
+    if (r.status === 200 || r.status === 201) ok('GV chấm sub3 → CHO_DUYET');
     else bad('GV chấm sub3 expected 2xx', { status: r.status, data: r.data });
 
     // Negative: reason < 10 ký tự
@@ -1029,8 +1029,8 @@ async function main() {
   if (r.status === 200 || r.status === 201) {
     ok('Step 6: GV chấp nhận & gửi đi → 2xx (KHÔNG bị khoá)');
     s = await prisma.submission.findUnique({ where: { id: sub5Id } });
-    if (s?.status === 'DA_CHAM') ok('BE: status đã chuyển DA_CHAM sau "Chấp nhận & gửi đi"');
-    else bad(`BE: status expected DA_CHAM, got ${s?.status}`);
+    if (s?.status === 'CHO_DUYET') ok('BE: status đã chuyển CHO_DUYET sau "Chấp nhận & gửi đi"');
+    else bad(`BE: status expected CHO_DUYET, got ${s?.status}`);
   } else {
     bad('CONFIRMED BUG: GV không submit grade chính thức được sau khi SV nộp lại', { status: r.status, data: r.data });
   }

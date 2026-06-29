@@ -35,7 +35,6 @@ export class NotificationService {
       [SubmissionStatus.YEU_CAU_SUA]: 'Yêu cầu sửa',
       [SubmissionStatus.TU_CHOI]: 'Từ chối',
       [SubmissionStatus.DA_CHAM]: 'Đã chấm',
-      [SubmissionStatus.HOAN_THANH]: 'Hoàn thành',
     };
 
     const statusLabel = statusLabels[newStatus] || newStatus;
@@ -43,17 +42,6 @@ export class NotificationService {
       userId,
       title: 'Cập nhật trạng thái bài nộp',
       content: `Bài nộp của bạn đã được chuyển sang trạng thái "${statusLabel}" bởi ${actorName}.`,
-      type: 'TRANG_THAI',
-      submissionId,
-    });
-  }
-
-  async notifyGradeApproval(userId: string, submissionId: string, isApproved: boolean) {
-    const action = isApproved ? 'đã được phê duyệt' : 'đã bị trả về';
-    return await this.createNotification({
-      userId,
-      title: 'Kết quả phê duyệt điểm',
-      content: `Điểm bài nộp của bạn ${action} bởi Phòng Đào tạo.`,
       type: 'TRANG_THAI',
       submissionId,
     });

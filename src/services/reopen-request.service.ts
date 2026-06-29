@@ -34,9 +34,9 @@ export class ReopenRequestService {
       throw new ForbiddenError('Bạn không phải giảng viên phụ trách bài báo cáo này');
     }
 
-    // Check status DA_CHAM or CHO_DUYET
-    if (submission.status !== SubmissionStatus.DA_CHAM && submission.status !== SubmissionStatus.CHO_DUYET) {
-      throw new BadRequestError('Chỉ được yêu cầu mở lại khi báo cáo ở trạng thái Đã chấm hoặc Chờ duyệt');
+    // DA_CHAM là terminal state duy nhất sau khi chấm
+    if (submission.status !== SubmissionStatus.DA_CHAM) {
+      throw new BadRequestError('Chỉ được yêu cầu mở lại khi báo cáo ở trạng thái Đã chấm');
     }
 
     // Check class is not locked
@@ -92,9 +92,6 @@ export class ReopenRequestService {
     if (!submission) {
       throw new NotFoundError('Không tìm thấy bài báo cáo');
     }
-    if (submission.status === SubmissionStatus.HOAN_THANH) {
-      throw new BadRequestError('Báo cáo đã hoàn thành, không thể mở lại');
-    }
     if (submission.group?.classId) {
       await academicService.verifyTermActive(submission.group.classId);
     }
@@ -124,14 +121,6 @@ export class ReopenRequestService {
       if (updateResult.count === 0) {
         throw new BadRequestError('Xung đột dữ liệu báo cáo, vui lòng thử lại');
       }
-
-      // 2b. Bỏ phê duyệt bảng điểm hiện tại — nếu để Grade.isApproved=true thì
-      // submitGrade sẽ chặn ngay với lỗi "đã được phê duyệt chính thức", làm vô hiệu
-      // hoá toàn bộ flow mở lại chấm điểm mà PĐT vừa đồng ý.
-      await tx.grade.updateMany({
-        where: { submissionId: request.submissionId, isApproved: true },
-        data: { isApproved: false, approvedById: null, version: { increment: 1 } },
-      });
 
       // 3. Log
       await tx.submissionLog.create({

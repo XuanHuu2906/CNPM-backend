@@ -167,19 +167,15 @@ export class TeacherController {
     return ApiResponse.created(res, "Import nhóm hàng loạt thành công", data);
   }
 
-  // UC-16: GV gửi duyệt cả lớp.
-  async submitClassForReview(req: Request, res: Response) {
-    const teacherId = req.user!.actorId!;
-    const userId = req.user!.id;
-    const { id } = req.params;
-    const data = await teacherService.submitClassForReview(id, teacherId, userId);
-    await auditLog(
-      userId,
-      'GV_GUI_DUYET_CA_LOP',
-      `GV gửi duyệt cả lớp ${id}: chuyển ${data.movedCount} bài sang CHO_DUYET (bỏ qua ${data.skippedCount}, lỗi ${data.failedCount})`,
-      req.ip,
-    );
-    return ApiResponse.success(res, 'Đã gửi duyệt các bài đã chấm xong của lớp', data);
+  // @deprecated - workflow PĐT duyệt đã bỏ. Endpoint giữ stub để FE cũ không lỗi 404.
+  async submitClassForReview(_req: Request, res: Response) {
+    return ApiResponse.success(res, 'Tính năng đã bỏ — GV chấm xong là điểm chính thức', {
+      classId: null,
+      movedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      skipped: [],
+    });
   }
 
   async importGroupsExcel(req: Request, res: Response) {

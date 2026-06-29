@@ -106,38 +106,6 @@ export class GradeRepository {
     });
   }
 
-  /**
-   * Phê duyệt hoặc hủy phê duyệt bảng điểm kèm kiểm duyệt phiên bản OCC
-   */
-  async approveGradeWithOCC(
-    submissionId: string,
-    currentVersion: number,
-    isApproved: boolean,
-    approvedById: string
-  ): Promise<any> {
-    return await prisma.$transaction(async (tx) => {
-      const updateResult = await tx.grade.updateMany({
-        where: {
-          submissionId,
-          version: currentVersion,
-        },
-        data: {
-          isApproved,
-          approvedById: isApproved ? approvedById : null,
-          version: { increment: 1 },
-        },
-      });
-
-      if (updateResult.count === 0) {
-        throw new BadRequestError("Bảng điểm đã bị thay đổi bởi một tiến trình khác trước đó. Vui lòng tải lại trang.");
-      }
-
-      const updated = await tx.grade.findUniqueOrThrow({
-        where: { submissionId },
-      });
-      return this.mapGrade(updated);
-    });
-  }
 }
 
 export const gradeRepository = new GradeRepository();

@@ -487,13 +487,13 @@ async function main() {
     },
   });
 
-  // 2. Group 2 (SE301_L01) -> DA_CHAM (graded, waiting approval)
+  // 2. Group 2 (SE301_L01) -> CHO_DUYET (graded, waiting approval)
   const sub2 = await prisma.submission.create({
     data: {
       groupId: grp2.id,
       filePath: '/uploads/reports/se301_l01_group2_draft.pdf',
       attachments: '/uploads/reports/se301_l01_group2_demo.mp4',
-      status: SubmissionStatus.DA_CHAM,
+      status: SubmissionStatus.CHO_DUYET,
       version: 1,
       submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
     },

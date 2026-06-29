@@ -12,6 +12,7 @@ import internalNoteRouter from './v1/comment.routes';
 import editRequestRouter from './v1/edit-request.routes';
 import notificationRouter from './v1/notification.routes';
 import resubmissionRequestRouter from './v1/resubmission-request.routes';
+import gradeAppealRouter from './v1/grade-appeal.routes';
 import teacherRouter from './v1/teacher.routes';
 import internalRouter from './v1/internal.routes';
 
@@ -62,6 +63,9 @@ router.use('/notifications', notificationRouter);
 
 // 13. Phân hệ Yêu cầu nộp lại (Resubmission Request Module - UC-23)
 router.use('/resubmission-requests', resubmissionRequestRouter);
+
+// 13.1 Phân hệ Yêu cầu phúc khảo điểm (UC-25)
+router.use('/grade-appeals', gradeAppealRouter);
 
 // 14. Phân hệ Giảng viên Quản lý nhóm & đề tài (Teacher Module)
 router.use('/teacher', teacherRouter);

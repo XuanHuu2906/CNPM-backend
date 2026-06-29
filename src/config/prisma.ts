@@ -17,9 +17,7 @@ export const SubmissionStatus = {
   DANG_CHAM: 'DANG_CHAM',
   YEU_CAU_SUA: 'YEU_CAU_SUA',
   TU_CHOI: 'TU_CHOI',
-  DA_CHAM: 'DA_CHAM',
-  CHO_DUYET: 'CHO_DUYET',
-  HOAN_THANH: 'HOAN_THANH'
+  DA_CHAM: 'DA_CHAM'
 } as const;
 
 export const AssignmentType = {

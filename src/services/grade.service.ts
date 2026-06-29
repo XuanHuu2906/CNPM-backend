@@ -48,21 +48,14 @@ export class GradeService {
     }
     await verifyTeacherClassOwnership(classId, teacherId);
 
-    // B7: Chặn cập nhật điểm khi bài đã chấm xong / chờ duyệt / hoàn thành.
+    // B7: Chặn cập nhật điểm khi bài đã chấm xong (DA_CHAM là terminal state).
     // GV phải gửi yêu cầu mở lại chấm điểm để chỉnh sửa.
-    const lockedStatuses: SubmissionStatus[] = [
-      SubmissionStatus.DA_CHAM,
-      SubmissionStatus.CHO_DUYET,
-      SubmissionStatus.HOAN_THANH,
-    ];
+    const lockedStatuses: SubmissionStatus[] = [SubmissionStatus.DA_CHAM];
     const existingGrade = await gradeRepository.findGradeBySubmissionId(submissionId);
     if (existingGrade && lockedStatuses.includes(submission.status as SubmissionStatus)) {
       throw new ForbiddenError(
         'Bài nộp đã được chấm. Vui lòng gửi yêu cầu mở lại chấm điểm để chỉnh sửa.'
       );
-    }
-    if (existingGrade && existingGrade.isApproved) {
-      throw new BadRequestError("Bảng điểm của bài báo cáo này đã được Phòng Đào Tạo phê duyệt chính thức. Không thể chỉnh sửa điểm số!");
     }
 
     if (submission.status === SubmissionStatus.CHUA_NOP) {
@@ -130,14 +123,14 @@ export class GradeService {
       data.version
     );
 
-    // 6. Cập nhật trạng thái bài nộp của sinh viên thành DA_CHAM kèm ghi logs và OCC (nếu không phải là lưu nháp)
+    // 6. Cập nhật trạng thái bài nộp sang DA_CHAM (terminal) kèm ghi logs và OCC (nếu không phải lưu nháp)
     if (!data.isDraft) {
       await submissionRepository.updateSubmissionStatusWithOCC(
         submissionId,
         submission.version,
         {
-          status: 'DA_CHAM' as SubmissionStatus, // Casting to avoid undefined if prisma client is broken
-          note: "Hệ thống tự động chuyển đổi trạng thái báo cáo sau khi Giảng viên chấm điểm thành công",
+          status: SubmissionStatus.DA_CHAM,
+          note: "Hệ thống tự động chuyển báo cáo sang Đã chấm sau khi Giảng viên chấm điểm xong",
         },
         teacherId
       );
@@ -181,8 +174,8 @@ export class GradeService {
   // ==========================================
   // Quy tắc R11:
   //  - Điểm nhóm áp 100% cho mọi thành viên mặc định (hệ số 1.0).
-  //  - GV phụ trách lớp được điều chỉnh hệ số 0–1.5 trước khi gửi duyệt (CHO_DUYET).
-  //  - Đóng băng sau khi bài chuyển sang CHO_DUYET / HOAN_THANH (PĐT đã / đang duyệt).
+  //  - GV phụ trách lớp được điều chỉnh hệ số 0–1.5 trước khi chấm xong (DA_CHAM).
+  //  - Đóng băng sau khi bài chuyển sang DA_CHAM (terminal).
   //  - Áp dụng cho submission có groupId (bài nhóm). Bài cá nhân: không áp dụng.
   async setMemberAdjustments(
     submissionId: string,
@@ -205,12 +198,9 @@ export class GradeService {
     await verifyTeacherClassOwnership(classId, teacherId);
     await academicService.verifyTermActive(classId);
 
-    // Khóa sau khi gửi duyệt — PĐT đã / đang xét.
-    if (
-      submission.status === SubmissionStatus.CHO_DUYET ||
-      submission.status === SubmissionStatus.HOAN_THANH
-    ) {
-      throw new ForbiddenError('Bài nộp đang chờ duyệt hoặc đã hoàn thành — không thể điều chỉnh hệ số đóng góp');
+    // Khóa sau khi bài đã chấm xong (DA_CHAM = terminal).
+    if (submission.status === SubmissionStatus.DA_CHAM) {
+      throw new ForbiddenError('Bài nộp đã chấm xong — không thể điều chỉnh hệ số đóng góp');
     }
 
     const grade = await gradeRepository.findGradeBySubmissionId(submissionId);

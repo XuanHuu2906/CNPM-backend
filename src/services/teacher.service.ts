@@ -4,7 +4,7 @@ import { academicService } from './academic.service';
 import { academicRepository } from '../repositories/academic.repository';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../utils/apiResponse';
 import { SecurityHelper } from '../utils/securityHelper';
-import { SubmissionStatus, UserRole } from '@prisma/client';
+import '@prisma/client';
 import { AssignmentType } from '../config/prisma';
 
 const isRedFont = (argb?: string) => {
@@ -25,100 +25,6 @@ export class TeacherService {
       throw new ForbiddenError("Bạn không được phân công phụ trách lớp học phần này");
     }
     return assignment;
-  }
-
-  /**
-   * UC-16 (Luồng thay thế): GV "Gửi duyệt cả lớp" — chuyển toàn bộ bài DA_CHAM của lớp
-   * sang CHO_DUYET trong 1 thao tác để PĐT duyệt theo lô. Quy tắc:
-   *  - Chỉ GV phụ trách lớp được gọi.
-   *  - Bỏ qua bài chưa có Grade (chưa chấm), bài ở trạng thái khác DA_CHAM, học kỳ đã khóa.
-   *  - Mỗi bài chuyển status với OCC (tránh race với GV khác hoặc chính GV đang chấm).
-   */
-  async submitClassForReview(classId: string, teacherId: string, actorUserId: string) {
-    await this.verifyOwnership(classId, teacherId);
-    await academicService.verifyTermActive(classId);
-
-    // Lấy mọi bài thuộc lớp đang ở DA_CHAM kèm Grade
-    const submissions = await prisma.submission.findMany({
-      where: {
-        OR: [
-          { group: { classId } },
-          { student: { enrollments: { some: { classId } } } },
-        ],
-        status: SubmissionStatus.DA_CHAM,
-      },
-      include: {
-        grades: { select: { id: true } },
-      },
-    });
-
-    const eligible = submissions.filter(s => s.grades.length > 0);
-    const skipped = submissions
-      .filter(s => s.grades.length === 0)
-      .map(s => ({ submissionId: s.id, reason: 'Chưa có điểm chấm' }));
-
-    const moved: string[] = [];
-    const failures: Array<{ submissionId: string; reason: string }> = [];
-
-    for (const sub of eligible) {
-      try {
-        await prisma.$transaction(async (tx) => {
-          const updated = await tx.submission.updateMany({
-            where: { id: sub.id, version: sub.version, status: SubmissionStatus.DA_CHAM },
-            data: { status: SubmissionStatus.CHO_DUYET, version: { increment: 1 } },
-          });
-          if (updated.count === 0) {
-            throw new BadRequestError('OCC mismatch hoặc trạng thái đã đổi');
-          }
-          await tx.submissionLog.create({
-            data: {
-              submissionId: sub.id,
-              oldStatus: SubmissionStatus.DA_CHAM,
-              newStatus: SubmissionStatus.CHO_DUYET,
-              actorId: actorUserId,
-              note: 'GV gửi duyệt cả lớp (UC-16 batch)',
-            },
-          });
-        });
-        moved.push(sub.id);
-      } catch (err: any) {
-        failures.push({ submissionId: sub.id, reason: err.message || 'Lỗi không xác định' });
-      }
-    }
-
-    // 1 thông báo gộp cho PĐT thay vì 1 notification/bài (R8).
-    if (moved.length > 0) {
-      try {
-        const classRecord = await prisma.class.findUnique({
-          where: { id: classId },
-          select: { classCode: true },
-        });
-        const pdtUsers = await prisma.user.findMany({
-          where: { role: { in: [UserRole.ACADEMIC_DEPT, UserRole.ADMIN] }, isActive: true },
-          select: { id: true },
-        });
-        if (pdtUsers.length > 0) {
-          await prisma.notification.createMany({
-            data: pdtUsers.map(u => ({
-              userId: u.id,
-              title: `Lớp ${classRecord?.classCode ?? classId} đã gửi duyệt`,
-              content: `Giảng viên phụ trách đã chấm xong và gửi ${moved.length} bài của lớp ${classRecord?.classCode ?? classId} sang Chờ duyệt.`,
-              type: 'HE_THONG',
-            })),
-          });
-        }
-      } catch {
-        // best-effort
-      }
-    }
-
-    return {
-      classId,
-      movedCount: moved.length,
-      skippedCount: skipped.length,
-      failedCount: failures.length,
-      skipped: skipped.concat(failures),
-    };
   }
 
   /**

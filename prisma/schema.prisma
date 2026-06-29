@@ -41,6 +41,7 @@ model User {
   backups            Backup[]
   approvals          Approval[]
   reopenRequestReviews GradingReopenRequest[]
+  gradeAppealReviews GradeAppealRequest[]
   assignmentChanges  AssignmentHistory[] @relation("AssignmentHistoryActor")
 
   @@map("NguoiDung")
@@ -103,6 +104,7 @@ model Student {
   submissions      Submission[] @relation("SubmissionStudent")
   resubmissionRequests ResubmissionRequest[] @relation("ResubmissionRequestStudent")
   gradeAdjustments GradeMemberAdjustment[]
+  gradeAppeals     GradeAppealRequest[]
 
   @@map("SinhVien")
 }
@@ -258,6 +260,7 @@ model Submission {
   notifications Notification[]
   resubmissionRequests ResubmissionRequest[]
   reopenRequests GradingReopenRequest[]
+  gradeAppeals   GradeAppealRequest[]
 
   @@map("BaoCao")
 }
@@ -286,8 +289,6 @@ model Grade {
   detailedScores String   @map("DiemChiTiet") // JSON string
   finalScore     Decimal  @map("DiemTong") @db.Decimal(5, 2)
   feedback       String?  @map("NhanXet")
-  isApproved     Boolean  @default(false) @map("IsXacNhan")
-  approvedById   String?  @map("NguoiPheDuyet")
   version        Int      @default(1) @map("PhienBan")
   createdAt      DateTime @default(now()) @map("NgayTao")
   updatedAt      DateTime @updatedAt @map("NgayCapNhat")
@@ -504,6 +505,40 @@ enum GradingReopenRequestStatus {
   APPROVED
   REJECTED
   CANCELLED
+}
+
+// ---------- GradeAppealRequest (YeuCauPhucKhao) ----------
+// SV gửi phúc khảo điểm sau khi PĐT đã duyệt (status=HOAN_THANH).
+// Mỗi submission chỉ được phép 1 đơn duy nhất (unique submissionId), gửi trong vòng
+// 14 ngày kể từ thời điểm chuyển HOAN_THANH. PĐT trực tiếp duyệt; khi duyệt sẽ
+// flip Grade.isApproved=false và Submission.status=DANG_CHAM cho GV chấm lại.
+model GradeAppealRequest {
+  id            String   @id @default(uuid())
+  submissionId  String   @unique
+  studentId     String
+  reason        String
+  status        GradeAppealRequestStatus @default(PENDING)
+
+  reviewedById  String?
+  reviewNote    String?
+  reviewedAt    DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+  student    Student    @relation(fields: [studentId], references: [id])
+  reviewer   User?      @relation(fields: [reviewedById], references: [id])
+
+  @@index([studentId])
+  @@index([status])
+  @@map("YeuCauPhucKhao")
+}
+
+enum GradeAppealRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ==========================================
