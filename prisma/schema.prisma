@@ -239,6 +239,10 @@ model Submission {
   rejectReason    String?  @map("LyDoTuChoi")
   // B13: phân loại vi phạm (vd CHO_KIEM_TRA, GIAN_LAN, ...) — trước đây nhét JSON vào rejectReason.
   violationType   String?  @map("LoaiViPham")
+  // Liên kết ngoài cho source code (GitHub/GitLab) và video demo (YouTube/Drive).
+  // Tách riêng khỏi attachments để FE/BE phân biệt được "file đính kèm" vs "link tham chiếu".
+  repoLink        String?  @map("LinkSourceCode")
+  videoLink       String?  @map("LinkVideoDemo")
   submittedAt     DateTime @default(now()) @map("NgayNop")
   createdAt       DateTime @default(now()) @map("NgayTao")
   updatedAt       DateTime @updatedAt @map("NgayCapNhat")

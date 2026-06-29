@@ -13,7 +13,7 @@ export class SubmissionService {
    */
   async submitReport(
     studentId: string,
-    data: { filePath: string; attachments: string[]; classId: string }
+    data: { filePath: string; attachments: string[]; classId: string; repoLink?: string; videoLink?: string }
   ): Promise<Submission> {
     // 1. Kiểm tra tồn tại thông tin sinh viên
     const student = await prisma.student.findUnique({
@@ -81,7 +81,12 @@ export class SubmissionService {
       const result = await submissionRepository.resubmitReport(
         existingSubmission.id,
         existingSubmission.version,
-        { filePath: data.filePath, attachments: data.attachments },
+        {
+          filePath: data.filePath,
+          attachments: data.attachments,
+          repoLink: data.repoLink?.trim() || null,
+          videoLink: data.videoLink?.trim() || null,
+        },
         studentId
       );
       await studentNotificationService.notifySubmissionSuccess(result.id, true);
@@ -96,6 +101,8 @@ export class SubmissionService {
         status: SubmissionStatus.DA_NOP,
         studentId,
         groupId: groupId ? groupId : null,
+        repoLink: data.repoLink?.trim() || null,
+        videoLink: data.videoLink?.trim() || null,
       };
 
       const result = await submissionRepository.createSubmission(submissionData, studentId);

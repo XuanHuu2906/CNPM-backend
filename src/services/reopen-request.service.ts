@@ -125,6 +125,14 @@ export class ReopenRequestService {
         throw new BadRequestError('Xung đột dữ liệu báo cáo, vui lòng thử lại');
       }
 
+      // 2b. Bỏ phê duyệt bảng điểm hiện tại — nếu để Grade.isApproved=true thì
+      // submitGrade sẽ chặn ngay với lỗi "đã được phê duyệt chính thức", làm vô hiệu
+      // hoá toàn bộ flow mở lại chấm điểm mà PĐT vừa đồng ý.
+      await tx.grade.updateMany({
+        where: { submissionId: request.submissionId, isApproved: true },
+        data: { isApproved: false, approvedById: null, version: { increment: 1 } },
+      });
+
       // 3. Log
       await tx.submissionLog.create({
         data: {
