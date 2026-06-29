@@ -4,6 +4,11 @@ export const approveGradeSchema = z.object({
   body: z.object({
     isApproved: z.boolean({ required_error: "Trạng thái phê duyệt là bắt buộc" }),
     version: z.number({ required_error: "Số phiên bản kiểm soát đồng thời (version) là bắt buộc để tránh tranh chấp" }).int().positive(),
+    // UC-16: khi trả về (isApproved=false) thì PĐT phải nhập lý do để lưu vào Submission.rejectReason & SubmissionLog.
+    reason: z.string().min(1).optional(),
+  }).refine((d) => d.isApproved || (d.reason && d.reason.trim().length >= 5), {
+    message: 'Lý do trả về phải có ít nhất 5 ký tự',
+    path: ['reason'],
   }),
 });
 

@@ -9,7 +9,8 @@ export class SystemController {
   // UC-16: Phê duyệt theo lô — PĐT chọn nhiều bài để phê duyệt hoặc trả về cùng lúc.
   async batchApproveGrades(req: Request, res: Response) {
     const { submissionIds, action, reason } = req.body || {};
-    const actorId = req.user?.actorId;
+    // Dùng User.id (không phải actorId = AcademicDept.id) vì SystemLog.userId là FK đến NguoiDung.
+    const actorId = req.user?.id;
     if (!actorId) {
       throw new BadRequestError('Yêu cầu xác thực Phòng Đào Tạo / Admin');
     }
@@ -27,14 +28,15 @@ export class SystemController {
 
   async approveGrade(req: Request, res: Response) {
     const { submissionId } = req.params;
-    const { isApproved, version } = req.body;
-    const approvedById = req.user?.actorId;
+    const { isApproved, version, reason } = req.body;
+    // Dùng User.id vì SystemLog.userId là FK đến NguoiDung (actorId là AcademicDept.id sẽ gây FK violation → 500).
+    const approvedById = req.user?.id;
 
     if (!approvedById) {
       throw new BadRequestError("Tác nhân thực hiện phê duyệt phải là Phòng Đào Tạo hoặc Admin");
     }
 
-    const grade = await systemService.approveGrade(submissionId, isApproved, version, approvedById);
+    const grade = await systemService.approveGrade(submissionId, isApproved, version, approvedById, reason);
     
     const message = isApproved 
       ? "Phê duyệt chính thức bảng điểm báo cáo thành công" 
