@@ -11,24 +11,41 @@ import { uploadRateLimiter, submitRateLimiter } from '../../middleware/rateLimit
 
 const router = Router();
 
-// Cấu hình multer lưu tạm file trong Memory Buffer để stream trực tiếp lên Cloudinary
+// Cấu hình multer lưu tạm file trong Memory Buffer để stream trực tiếp lên Cloudinary.
+// Limit 100MB để hỗ trợ video demo / source zip lớn; lưu ý: buffer trong RAM nên cần monitor
+// memory usage khi nhiều user upload đồng thời (1 request ~100MB × N concurrent).
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 20 * 1024 * 1024, // Hạn chế tối đa 20MB
+    fileSize: 100 * 1024 * 1024,
   },
 });
 
-// B16: Whitelist các định dạng được chấp nhận để upload báo cáo
+// B16: Whitelist các định dạng được chấp nhận để upload báo cáo.
+// Bao gồm: tài liệu (pdf/doc/docx), slide (ppt/pptx), source code (zip/rar), database (sql),
+// ảnh (png/jpeg), video demo (mp4). Link GitHub/YouTube không upload mà nhập riêng vào
+// field repoLink / videoLink của Submission.
 const ALLOWED_UPLOAD_MIMES = new Set([
   'application/pdf',
   'image/png',
   'image/jpeg',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+  'application/octet-stream', // .rar / .sql / .db nhiều browser gửi mime này
+  'application/sql',
+  'video/mp4',
 ]);
 // UC-I02: whitelist extension để chặn file đã bị "rename" né mime detection.
-const ALLOWED_UPLOAD_EXTS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx']);
+const ALLOWED_UPLOAD_EXTS = new Set([
+  '.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx',
+  '.ppt', '.pptx', '.zip', '.rar', '.sql', '.db', '.mp4',
+]);
 
 /**
  * Sanitize tên file gốc thành Cloudinary public_id hợp lệ giữ được phần nhận diện.

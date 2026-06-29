@@ -24,6 +24,8 @@ export class SubmissionRepository {
       filePath: string;
       attachments: string[];
       status: SubmissionStatus;
+      repoLink?: string | null;
+      videoLink?: string | null;
     },
     actorId: string
   ): Promise<any> {
@@ -36,6 +38,8 @@ export class SubmissionRepository {
           filePath: data.filePath,
           attachments: data.attachments.join(','), // Ghép mảng thành chuỗi phân tách bởi dấu phẩy cho MSSQL
           status: data.status,
+          repoLink: data.repoLink ?? null,
+          videoLink: data.videoLink ?? null,
         },
       });
 
@@ -63,6 +67,8 @@ export class SubmissionRepository {
     data: {
       filePath: string;
       attachments: string[];
+      repoLink?: string | null;
+      videoLink?: string | null;
     },
     actorId: string
   ): Promise<any> {
@@ -84,6 +90,8 @@ export class SubmissionRepository {
           version: { increment: 1 },
           editRequestNote: null, // Reset yêu cầu sửa đổi cũ
           rejectReason: null,    // Reset từ chối cũ
+          repoLink: data.repoLink ?? null,
+          videoLink: data.videoLink ?? null,
         },
       });
 
@@ -342,6 +350,10 @@ export class SubmissionRepository {
                   include: {
                     subject: true,
                     term: true,
+                    // Để Dashboard PĐT lấy GV chấm chính (FE đọc class.assignments[0].teacher).
+                    assignments: {
+                      include: { teacher: { include: { user: { select: { fullName: true } } } } },
+                    },
                   },
                 },
               },
@@ -365,6 +377,9 @@ export class SubmissionRepository {
               include: {
                 subject: true,
                 term: true,
+                assignments: {
+                  include: { teacher: { include: { user: { select: { fullName: true } } } } },
+                },
               },
             },
           },

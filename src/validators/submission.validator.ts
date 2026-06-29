@@ -6,6 +6,9 @@ export const submitReportSchema = z.object({
     filePath: z.string({ required_error: "Đường dẫn tệp báo cáo chính là bắt buộc" }).min(2, "Đường dẫn tệp quá ngắn"),
     attachments: z.array(z.string()).optional().default([]),
     classId: z.string({ required_error: "ID lớp học phần là bắt buộc" }),
+    // Liên kết ngoài cho source code & video demo. Optional, validate URL nếu có.
+    repoLink: z.string().url('Link source code phải là URL hợp lệ').optional().or(z.literal('')),
+    videoLink: z.string().url('Link video demo phải là URL hợp lệ').optional().or(z.literal('')),
   }),
 });
 
