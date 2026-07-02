@@ -29,6 +29,7 @@ async function main() {
   // gradingReopenRequest phải xóa trước submission/teacher/user vì FK của nó không Cascade
   // (xem schema), nếu còn data sẽ block các deleteMany kế tiếp.
   await prisma.gradingReopenRequest.deleteMany().catch(() => {});
+  await prisma.gradeAppealRequest.deleteMany().catch(() => {});
   await prisma.gradeMemberAdjustment.deleteMany().catch(() => {});
   await prisma.resubmissionRequest.deleteMany().catch(() => {});
   await prisma.comment.deleteMany().catch(() => {});
@@ -481,8 +482,6 @@ async function main() {
       detailedScores: JSON.stringify(grade1Detailed),
       finalScore: 8.5,
       feedback: 'Báo cáo trình bày xuất sắc, đáp ứng đầy đủ yêu cầu hệ thống đề ra, thuyết trình trôi chảy.',
-      isApproved: true,
-      approvedById: deptUser.id,
       version: 1,
     },
   });
@@ -512,7 +511,6 @@ async function main() {
       detailedScores: JSON.stringify(grade2Detailed),
       finalScore: 7.0,
       feedback: 'Bản vẽ thiết kế còn một số sai sót, cần chú ý chuẩn hóa các sơ đồ UML.',
-      isApproved: false,
       version: 1,
     },
   });
@@ -598,8 +596,6 @@ async function main() {
       detailedScores: JSON.stringify(grade8Detailed),
       finalScore: 9.4,
       feedback: 'Phần mô phỏng tập lệnh MIPS chạy rất tốt, lập trình mạch Logisim tối ưu và sáng tạo.',
-      isApproved: true,
-      approvedById: deptUser.id,
       version: 1,
     },
   });
